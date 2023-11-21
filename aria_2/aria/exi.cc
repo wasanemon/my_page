@@ -173,7 +173,7 @@ public:
         return;
     }
 
-    void w_reserve(uint32_t my_tid, uint32_t my_batch_id, size_t my_thread_id) 
+    void w_reserve(uint32_t my_tid, uint32_t my_batch_id) 
     {
         uint64_t expected_lock = 0;
         for(auto &wset : write_set_){
@@ -207,7 +207,7 @@ public:
         return ;
     }
 
-    void r_reserve(uint32_t my_tid,  uint32_t my_batch_id, size_t my_thread_id) 
+    void r_reserve(uint32_t my_tid,  uint32_t my_batch_id) 
     {
         uint64_t expected_lock = 0;
         for(auto &rset : read_set_){
@@ -415,9 +415,9 @@ POINT:
 
         
 
-        trans.w_reserve(tid, batch_id, thread_id);
+        trans.w_reserve(tid, batch_id);
         
-        trans.r_reserve(tid, batch_id, thread_id);
+        trans.r_reserve(tid, batch_id);
         if(sleep_flg == 1){
             cout << "sleep" << std::endl;
             std::this_thread::sleep_for(std::chrono::microseconds(SLEEP_TIME));
