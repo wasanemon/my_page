@@ -296,74 +296,25 @@ public:
 void makeTask(std::vector<Task> &tasks, Xoroshiro128Plus &rnd, FastZipf &zipf)
 {
     tasks.clear();
-    if((rnd.next() % 100) < SKEW_PLACE)
+    for (size_t i = 0; i < MAX_OPE; ++i)
     {
-        if((rnd.next() % 100) < LONG_WRITE_RATE)
-        {
-            for (size_t i = 0; i < MAX_OPE_FOR_LONG; ++i)
-            {
-                uint64_t random_gen_key = zipf();
-                // std::cout << random_gen_key << std::endl;
-                assert(random_gen_key < TUPLE_NUM);
-                if ((rnd.next() % 100) < RW_RATE_LONG)
-                {
-                    tasks.emplace_back(Ope::WRITE, random_gen_key + 1);
-                }
-                else
-                {
-                    tasks.emplace_back(Ope::READ, TUPLE_NUM - random_gen_key + 1);
-                }
-            }
-        }else{
-            for (size_t i = 0; i < MAX_OPE; ++i)
-            {
-                uint64_t random_gen_key = zipf();
-                // std::cout << random_gen_key << std::endl;
-                assert(random_gen_key < TUPLE_NUM);
-                if ((rnd.next() % 100) < RW_RATE)
-                {
-                    tasks.emplace_back(Ope::WRITE, random_gen_key + 1);
-                }
-                else
-                {
-                    tasks.emplace_back(Ope::READ, TUPLE_NUM - random_gen_key + 1);
-                }
-            }
-        }
-    }else{
-        if ((rnd.next() % 100) < SLEEP_RATE)
+        uint64_t random_gen_key = zipf();
+        // std::cout << random_gen_key << std::endl;
+        assert(random_gen_key < TUPLE_NUM);
+
+        if(rnd.next() % 100 < SLEEP_RATE)
         {
             tasks.emplace_back(Ope::SLEEP, 0);
-        } else if((rnd.next() % 100) < LONG_WRITE_RATE)
+        }
+        else
         {
-            for (size_t i = 0; i < MAX_OPE_FOR_LONG; ++i)
+            if ((rnd.next() % 100) < RW_RATE)
             {
-                uint64_t random_gen_key = zipf();
-                // std::cout << random_gen_key << std::endl;
-                assert(random_gen_key < TUPLE_NUM);
-                if ((rnd.next() % 100) < RW_RATE_LONG)
-                {
-                    tasks.emplace_back(Ope::WRITE, TUPLE_NUM - random_gen_key + 1);
-                }
-                else
-                {
-                    tasks.emplace_back(Ope::READ, random_gen_key + 1);
-                }
+                tasks.emplace_back(Ope::READ, random_gen_key + 1);
             }
-        }else{
-            for (size_t i = 0; i < MAX_OPE; ++i)
+            else
             {
-                uint64_t random_gen_key = zipf();
-                // std::cout << random_gen_key << std::endl;
-                assert(random_gen_key < TUPLE_NUM);
-                if ((rnd.next() % 100) < RW_RATE)
-                {
-                    tasks.emplace_back(Ope::WRITE, TUPLE_NUM - random_gen_key + 1);
-                }
-                else
-                {
-                    tasks.emplace_back(Ope::READ, random_gen_key + 1);
-                }
+                tasks.emplace_back(Ope::WRITE, random_gen_key + 1);
             }
         }
     }
