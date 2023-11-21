@@ -18,7 +18,6 @@
 #define THREAD_NUM 64
 #define TUPLE_NUM 1000000
 #define MAX_OPE 10
-#define SLEEP_POS 9
 #define RW_RATE 50
 #define EX_TIME 3
 #define PRE_NUM 3000000
@@ -26,10 +25,6 @@
 #define SLEEP_TIME_INIT 2900 * 1000
 #define SKEW_PAR 0.0
 #define BACKOFF_TIME 0
-#define SKEW_PLACE 0
-#define MAX_OPE_FOR_LONG 1500
-#define RW_RATE_LONG 33
-#define LONG_WRITE_RATE 0
 #define SLEEP_RATE 1
 
 
