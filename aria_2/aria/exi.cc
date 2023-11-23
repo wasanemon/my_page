@@ -166,10 +166,11 @@ public:
         return;
     }
 
-    void update(const uint64_t key)
+    void update()
     {
-        Tuple *tuple = &Table[key];
-        tuple->value_ = 100;
+        for(auto &wset : write_set_){
+            wset.tuple_->value_ = wset.value_;
+        }
         return;
     }
 
@@ -349,7 +350,6 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
     uint64_t sleep_flg = 0;
     __atomic_store_n(&ready, 1, __ATOMIC_SEQ_CST);
 
-
     while (!__atomic_load_n(&start, __ATOMIC_SEQ_CST))
     {
     }
@@ -377,7 +377,6 @@ POINT:
             lock_for_locks.w_unlock();
         }
        
-
         // pre_tx_setからコピー
         Pre &work_tx = Pre_tx_set[tx_pos].first;
         trans.task_set_ = work_tx.task_set_;
@@ -387,7 +386,6 @@ POINT:
         sleep_flg = 0;
         trans.begin(); 
 
-       
 //concurrency control phase
 
     //execution phase
@@ -412,18 +410,14 @@ POINT:
                 break;
             }
         }
-
         
-
         trans.w_reserve(tid, batch_id);
-        
         trans.r_reserve(tid, batch_id);
         if(sleep_flg == 1){
             cout << "sleep" << std::endl;
             std::this_thread::sleep_for(std::chrono::microseconds(SLEEP_TIME));
         }
         
-
         //同期ポイント① waiting for reservation
         
         sync_point.arrive_and_wait();
@@ -449,21 +443,17 @@ POINT:
         {
             trans.abort();
         }else{
-            for(auto &wset : trans.write_set_){
-                trans.update(wset.key_);
-            }
+            trans.update();
             trans.commit();
         }
         
         //同期ポイント② waiting for update
         sync_point.arrive_and_wait();
 
-       
         if (!__atomic_load_n(&quit, __ATOMIC_SEQ_CST) && trans.status_ != Status::ABORTED)
         {
             myres.commit_cnt_++;
         }
-        
     }
     sync_point.arrive_and_drop();
 }
