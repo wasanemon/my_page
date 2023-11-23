@@ -164,10 +164,11 @@ public:
         return;
     }
 
-    void update(const uint64_t key)
+    void update()
     {
-        Tuple *tuple = &Table[key];
-        tuple->value_ = 100;
+        for(auto &wset : write_set_){
+            wset.tuple_->value_ = wset.value_;
+        }
         return;
     }
 
@@ -448,9 +449,7 @@ POINT:
         {
             trans.abort();
         }else{
-            for(auto &wset : trans.write_set_){
-                trans.update(wset.key_);
-            }
+            trans.update();
             trans.commit();
         }
         //同期ポイント③ waiting for update
