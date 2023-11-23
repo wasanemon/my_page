@@ -19,15 +19,13 @@
 #define THREAD_NUM 64
 #define TUPLE_NUM 1000000
 #define MAX_OPE 10
-#define SLEEP_POS 9
 #define RW_RATE 50
 #define EX_TIME 3
-#define PRE_NUM 3000000
-#define SLEEP_TIME 1000
+#define PRE_NUM 1000000
+#define SLEEP_TIME 1000000
 #define SLEEP_TIME_INIT 2900 * 1000
 #define SKEW_PAR 0.0
 #define BACKOFF_TIME 0
-#define SKEW_PLACE 0
 #define SLEEP_RATE 1
 
 uint64_t tx_counter;
@@ -291,6 +289,12 @@ public:
     }
 };
 
+void makeSleep(std::vector<Task> &tasks, Xoroshiro128Plus &rnd, FastZipf &zipf)
+{
+    tasks.clear();
+    tasks.emplace_back(Ope::SLEEP, 0);
+}
+
 void makeTask(std::vector<Task> &tasks, Xoroshiro128Plus &rnd, FastZipf &zipf)
 {
     tasks.clear();
@@ -299,21 +303,13 @@ void makeTask(std::vector<Task> &tasks, Xoroshiro128Plus &rnd, FastZipf &zipf)
         uint64_t random_gen_key = zipf();
         // std::cout << random_gen_key << std::endl;
         assert(random_gen_key < TUPLE_NUM);
-
-        if(rnd.next() % 100 < SLEEP_RATE)
+        if ((rnd.next() % 100) < RW_RATE)
         {
-            tasks.emplace_back(Ope::SLEEP, 0);
+            tasks.emplace_back(Ope::READ, random_gen_key + 1);
         }
         else
         {
-            if ((rnd.next() % 100) < RW_RATE)
-            {
-                tasks.emplace_back(Ope::READ, random_gen_key + 1);
-            }
-            else
-            {
-                tasks.emplace_back(Ope::WRITE, random_gen_key + 1);
-            }
+            tasks.emplace_back(Ope::WRITE, random_gen_key + 1);
         }
     }
 }
@@ -414,7 +410,6 @@ POINT:
         trans.w_reserve(tid, batch_id);
         trans.r_reserve(tid, batch_id);
         if(sleep_flg == 1){
-            cout << "sleep" << std::endl;
             std::this_thread::sleep_for(std::chrono::microseconds(SLEEP_TIME));
         }
         
@@ -482,17 +477,16 @@ int main(int argc, char *argv[])
     int tx_make_count = 0;
     for (auto &pre : Pre_tx_set)
     {
-        if (tx_make_count == 0 || tx_make_count == 1)
+
+        if(rnd.next() % 100 < SLEEP_RATE)
         {
-            makeTask_init(pre.first.task_set_, rnd, zipf);
+            makeSleep(pre.first.task_set_, rnd, zipf);
         }
-        else
-        {
+        else{
             makeTask(pre.first.task_set_, rnd, zipf);
         }
         pre.second = tid;
         tx_make_count++;
-        
         tid++;
         
     }
@@ -526,7 +520,7 @@ int main(int argc, char *argv[])
         }
     }
     __atomic_store_n(&start, true, __ATOMIC_SEQ_CST);
-    std::this_thread::sleep_for(std::chrono::milliseconds(3000 * EX_TIME));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000 * EX_TIME));
 
     __atomic_store_n(&quit, true, __ATOMIC_SEQ_CST);
 
@@ -541,7 +535,7 @@ int main(int argc, char *argv[])
         total_count += re.commit_cnt_;
     }
     // float tps = total_count / (SLEEP_TIME_INIT / 1000 / 1000);
-    std::cout << "throughput exi:" << total_count / EX_TIME << std::endl;
+    std::cout << "throughput exi:" << SLEEP_TIME << " " << total_count / EX_TIME << std::endl;
 
     return 0;
 }
