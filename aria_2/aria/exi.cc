@@ -344,8 +344,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
     uint32_t batch_id = 0;
     uint64_t tx_pos;
     uint64_t sleep_flg = 0;
-    __atomic_store_n(&ready, 1, __ATOMIC_SEQ_CST);
-
+    __atomic_store_n(&ready, 1, __ATOMIC_SEQ_
     while (!__atomic_load_n(&start, __ATOMIC_SEQ_CST))
     {
     }
@@ -353,7 +352,8 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
 POINT:
 
     while (!__atomic_load_n(&quit, __ATOMIC_SEQ_CST))
-    {
+        {
+//sequencing layer starts
         //前のbatchにおいてabortしていた場合は、同一のTxを実行
         if(trans.status_ != Status::ABORTED){
             // aquire giant lock
@@ -381,11 +381,9 @@ POINT:
         batch_id++;
         sleep_flg = 0;
         trans.begin(); 
+//sequencing layer ends
 
-//concurrency control phase
-
-    //execution phase
-        //make R&W-set
+//execution phase starts
         for (auto &task : trans.task_set_)
         {
             switch (task.ope_)
@@ -406,23 +404,21 @@ POINT:
                 break;
             }
         }
-        
+    //do reservation
         trans.w_reserve(tid, batch_id);
         trans.r_reserve(tid, batch_id);
         if(sleep_flg == 1){
             std::this_thread::sleep_for(std::chrono::microseconds(SLEEP_TIME));
         }
-        
-        //同期ポイント① waiting for reservation
-        
+//execution phase ends
         sync_point.arrive_and_wait();
-
+//commit phase starts
+    //check waw conflict
         if(trans.has_waw(tid, batch_id))
         {
             trans.status_ = Status::ABORTED;
         }
-
-        //use reordering
+    //check war & raw conflict (reordering)
         if(trans.status_ != Status::ABORTED)
         {
             if(trans.has_raw(tid, batch_id))
@@ -433,7 +429,7 @@ POINT:
                 }
             }
         }
-        
+//commit phase ends
         if(trans.status_ == Status::ABORTED)
         {
             trans.abort();
@@ -441,8 +437,6 @@ POINT:
             trans.update();
             trans.commit();
         }
-        
-        //同期ポイント② waiting for update
         sync_point.arrive_and_wait();
 
         if (!__atomic_load_n(&quit, __ATOMIC_SEQ_CST) && trans.status_ != Status::ABORTED)
