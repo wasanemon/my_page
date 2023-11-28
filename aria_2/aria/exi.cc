@@ -406,6 +406,7 @@ POINT:
     //do W & R reservation
         trans.ReserveWrite(tid, batch_id);
         trans.ReserveRead(tid, batch_id);
+    //性能計測用
         if(sleep_flg == 1){
             std::this_thread::sleep_for(std::chrono::microseconds(SLEEP_TIME));
         }
@@ -427,11 +428,12 @@ POINT:
             {
                 if(trans.WAR(tid, batch_id))
                 {
+                    //RAW() == True && WAR() == Trueの場合に、Reordering失敗,
                     trans.status_ = Status::ABORTED;
                 }
             }
         }
-    //commit & update or abort & retry
+    //commit & update or abort
         if(trans.status_ == Status::ABORTED)
         {
             trans.abort();
