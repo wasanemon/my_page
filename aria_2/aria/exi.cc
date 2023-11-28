@@ -172,7 +172,7 @@ public:
         return;
     }
 
-    void w_reserve(uint32_t my_tid, uint32_t my_batch_id) 
+    void ReserveWrite(uint32_t my_tid, uint32_t my_batch_id) 
     {
         uint64_t expected_lock = 0;
         for(auto &wset : write_set_){
@@ -206,7 +206,7 @@ public:
         return ;
     }
 
-    void r_reserve(uint32_t my_tid,  uint32_t my_batch_id) 
+    void ReserveRead(uint32_t my_tid,  uint32_t my_batch_id) 
     {
         uint64_t expected_lock = 0;
         for(auto &rset : read_set_){
@@ -237,7 +237,7 @@ public:
         return ;
     }
 
-    bool has_waw(uint32_t my_tid, uint32_t my_batch_id)
+    bool WAW(uint32_t my_tid, uint32_t my_batch_id)
     {
         for(auto &wset : write_set_){
             if(wset.tuple_->w_tid_ != my_tid || wset.tuple_->batch_id_w_ != my_batch_id){
@@ -247,7 +247,7 @@ public:
         return false;
     }
 
-    bool has_raw(uint32_t my_tid, uint32_t my_batch_id)
+    bool RAW(uint32_t my_tid, uint32_t my_batch_id)
     {
         for(auto &rset : read_set_){
             if(my_tid > rset.tuple_->w_tid_ && rset.tuple_->batch_id_w_ == my_batch_id && rset.tuple_->w_tid_ != 0)
@@ -258,7 +258,7 @@ public:
         return false;
     }
 
-    bool has_war(uint32_t my_tid, uint32_t my_batch_id)
+    bool WAR(uint32_t my_tid, uint32_t my_batch_id)
     {
         for(auto &wset : write_set_){
             if(my_tid > wset.tuple_->r_tid_ && wset.tuple_->batch_id_r_ == my_batch_id && wset.tuple_->r_tid_ != 0)
@@ -344,7 +344,10 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
     uint32_t batch_id = 0;
     uint64_t tx_pos;
     uint64_t sleep_flg = 0;
-    __atomic_store_n(&ready, 1, __ATOMIC_SEQ_
+    __atomic_store_n(&ready, 1, __ATOMIC_SEQ_CST);
+
+
+//Thread starts
     while (!__atomic_load_n(&start, __ATOMIC_SEQ_CST))
     {
     }
@@ -352,9 +355,9 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
 POINT:
 
     while (!__atomic_load_n(&quit, __ATOMIC_SEQ_CST))
-        {
+    {
 //sequencing layer starts
-        //前のbatchにおいてabortしていた場合は、同一のTxを実行
+
         if(trans.status_ != Status::ABORTED){
             // aquire giant lock
             if (!lock_for_locks.w_try_lock())
@@ -372,11 +375,10 @@ POINT:
             __atomic_store_n(&tx_counter, tx_pos + 1, __ATOMIC_SEQ_CST);
             lock_for_locks.w_unlock();
         }
-       
-        // pre_tx_setからコピー
+    
         Pre &work_tx = Pre_tx_set[tx_pos].first;
         trans.task_set_ = work_tx.task_set_;
-        // uint64_t operation_count = 0;
+
         uint32_t tid = Pre_tx_set[tx_pos].second;
         batch_id++;
         sleep_flg = 0;
@@ -390,11 +392,9 @@ POINT:
             {
             case Ope::READ:
                 trans.read(task.key_);
-                // std::cout << "read" << std::endl;
                 break;
             case Ope::WRITE:
                 trans.write(task.key_);
-                // std::cout << "write" << std::endl;
                 break;
             case Ope::SLEEP:
                 sleep_flg = 1;
@@ -404,32 +404,34 @@ POINT:
                 break;
             }
         }
-    //do reservation
-        trans.w_reserve(tid, batch_id);
-        trans.r_reserve(tid, batch_id);
+    //do W & R reservation
+        trans.ReserveWrite(tid, batch_id);
+        trans.ReserveRead(tid, batch_id){
         if(sleep_flg == 1){
             std::this_thread::sleep_for(std::chrono::microseconds(SLEEP_TIME));
         }
 //execution phase ends
         sync_point.arrive_and_wait();
+
 //commit phase starts
     //check waw conflict
-        if(trans.has_waw(tid, batch_id))
+        if(trans.WAW(tid, batch_id))
         {
             trans.status_ = Status::ABORTED;
         }
     //check war & raw conflict (reordering)
         if(trans.status_ != Status::ABORTED)
         {
-            if(trans.has_raw(tid, batch_id))
+            if(trans.RAW(tid, batch_id))
             {
-                if(trans.has_war(tid, batch_id))
+                if(trans.WAR(tid, batch_id))
                 {
                     trans.status_ = Status::ABORTED;
                 }
             }
         }
 //commit phase ends
+
         if(trans.status_ == Status::ABORTED)
         {
             trans.abort();
@@ -443,17 +445,15 @@ POINT:
         {
             myres.commit_cnt_++;
         }
+
     }
+    }
+
     sync_point.arrive_and_drop();
 }
 
 int main(int argc, char *argv[])
 {
-
-    // gflags::ParseCommandLineFlags(&argc, &argv, true);
-    // std::cout << "#FLAGS_tuple_num" << FLAGS_tuple_num << "\n";
-
-    // initilize rnd and zipf
     Xoroshiro128Plus rnd;
     FastZipf zipf(&rnd, SKEW_PAR, TUPLE_NUM);
 
@@ -533,3 +533,4 @@ int main(int argc, char *argv[])
 
     return 0;
 }
+
