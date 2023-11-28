@@ -448,7 +448,7 @@ POINT:
         }
 
     }
-    }
+    
 
     sync_point.arrive_and_drop();
 }
