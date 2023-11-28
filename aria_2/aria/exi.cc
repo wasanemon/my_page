@@ -358,6 +358,7 @@ POINT:
     {
 //sequencing layer starts
 
+    //１つ前のepochにおいて、abortしていなかった場合、新たなTxを実行する
         if(trans.status_ != Status::ABORTED){
             // aquire giant lock
             if (!lock_for_locks.w_try_lock())
@@ -365,8 +366,6 @@ POINT:
                 std::this_thread::sleep_for(std::chrono::microseconds(BACKOFF_TIME));
                 goto POINT;
             }
-
-            // 取得すべきtxの現在地　ロック必要か
             tx_pos = __atomic_load_n(&tx_counter, __ATOMIC_SEQ_CST);
             if (tx_pos >= PRE_NUM)
             {
@@ -375,10 +374,9 @@ POINT:
             __atomic_store_n(&tx_counter, tx_pos + 1, __ATOMIC_SEQ_CST);
             lock_for_locks.w_unlock();
         }
-    
+    //Txの実行内容、tidの割り当て、batch_idのインクリメント
         Pre &work_tx = Pre_tx_set[tx_pos].first;
         trans.task_set_ = work_tx.task_set_;
-
         uint32_t tid = Pre_tx_set[tx_pos].second;
         batch_id++;
         sleep_flg = 0;
@@ -407,7 +405,7 @@ POINT:
         }
     //do W & R reservation
         trans.ReserveWrite(tid, batch_id);
-        trans.ReserveRead(tid, batch_id){
+        trans.ReserveRead(tid, batch_id);
         if(sleep_flg == 1){
             std::this_thread::sleep_for(std::chrono::microseconds(SLEEP_TIME));
         }
