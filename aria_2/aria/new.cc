@@ -172,7 +172,7 @@ public:
         return;
     }
 
-    void w_reserve(uint32_t my_tid, uint32_t my_batch_id, size_t my_thread_id) 
+    void ReserveWrite(uint32_t my_tid, uint32_t my_batch_id, size_t my_thread_id) 
     {
         uint64_t expected_lock = 0;
         for(auto &wset : write_set_){
@@ -205,7 +205,7 @@ public:
         return ;
     }
 
-    void r_reserve(uint32_t my_tid,  uint32_t my_batch_id) 
+    void ReserveRead(uint32_t my_tid,  uint32_t my_batch_id) 
     {
         uint64_t expected_lock = 0;
         for(auto &rset : read_set_){
@@ -236,7 +236,7 @@ public:
         return ;
     }
 
-    bool has_waw(uint32_t my_tid, uint32_t my_batch_id)
+    bool WAW(uint32_t my_tid, uint32_t my_batch_id)
     {
         for(auto &wset : write_set_){
             if(wset.tuple_->w_tid_ != my_tid || wset.tuple_->batch_id_w_ != my_batch_id)
@@ -247,7 +247,7 @@ public:
         return false;
     }
 
-    bool has_raw(uint32_t my_tid, uint32_t my_batch_id,std::array<uint32_t, THREAD_NUM>& aborted_list)
+    bool RAW(uint32_t my_tid, uint32_t my_batch_id,std::array<uint32_t, THREAD_NUM>& aborted_list)
     {
         for(auto &rset : read_set_){
 
@@ -262,7 +262,7 @@ public:
         return false;
     }
 
-    bool has_war(uint32_t my_tid, uint32_t my_batch_id,std::array<uint32_t, THREAD_NUM>& aborted_list)
+    bool WAR(uint32_t my_tid, uint32_t my_batch_id,std::array<uint32_t, THREAD_NUM>& aborted_list)
     {
         for(auto &wset : write_set_){
             if(my_tid > wset.tuple_->r_tid_ && wset.tuple_->batch_id_r_ == my_batch_id && wset.tuple_->r_tid_ != 0)
@@ -413,17 +413,17 @@ POINT:
             }
         }
 
-        trans.w_reserve(tid, batch_id, thread_id);
+        trans.ReserveWrite(tid, batch_id, thread_id);
     
         //同期ポイント① waiting for write reservation
         sync_point.arrive_and_wait();
 
-        if(trans.has_waw(tid, batch_id))
+        if(trans.WAW(tid, batch_id))
         {   
             trans.status_ = Status::ABORTED;
             aborted_list[thread_id] = 1;
         }else{
-            trans.r_reserve(tid, batch_id);
+            trans.ReserveRead(tid, batch_id);
         }
 
         
@@ -433,9 +433,9 @@ POINT:
         //use reordering
         if(trans.status_ != Status::ABORTED)
         {
-            if(trans.has_raw(tid, batch_id, aborted_list))
+            if(trans.RAW(tid, batch_id, aborted_list))
             {
-                if(trans.has_war(tid, batch_id, aborted_list))
+                if(trans.WAR(tid, batch_id, aborted_list))
                 {
                     trans.status_ = Status::ABORTED;
                 }
