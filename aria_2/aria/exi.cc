@@ -386,6 +386,7 @@ POINT:
 //sequencing layer ends
 
 //execution phase starts
+    //make read & write set
         for (auto &task : trans.task_set_)
         {
             switch (task.ope_)
@@ -431,7 +432,7 @@ POINT:
             }
         }
 //commit phase ends
-
+    //commit & update or abort & retry
         if(trans.status_ == Status::ABORTED)
         {
             trans.abort();
