@@ -420,6 +420,8 @@ POINT:
         {
             trans.status_ = Status::ABORTED;
         }
+
+    //WAW() == Falseの場合のみ
     //check war & raw conflict (reordering)
         if(trans.status_ != Status::ABORTED)
         {
@@ -431,7 +433,6 @@ POINT:
                 }
             }
         }
-//commit phase ends
     //commit & update or abort & retry
         if(trans.status_ == Status::ABORTED)
         {
@@ -440,6 +441,7 @@ POINT:
             trans.update();
             trans.commit();
         }
+//commit phase ends
         sync_point.arrive_and_wait();
 
         if (!__atomic_load_n(&quit, __ATOMIC_SEQ_CST) && trans.status_ != Status::ABORTED)
