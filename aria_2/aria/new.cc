@@ -464,7 +464,8 @@ POINT:
 
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[]) 
+{
 
     // gflags::ParseCommandLineFlags(&argc, &argv, true);
     // std::cout << "#FLAGS_tuple_num" << FLAGS_tuple_num << "\n";
