@@ -457,7 +457,7 @@ POINT:
 
     }
     
-
+　　　//各threadがworker関数を抜ける際に、他の同期ポイントで永遠に待つことがないようにするためのもの
     sync_point.arrive_and_drop();
 }
 
