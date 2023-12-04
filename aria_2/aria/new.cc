@@ -96,8 +96,8 @@ public:
     uint64_t value_;
     std::atomic<uint32_t> r_tid_;
     std::atomic<uint32_t> w_tid_;
-    std::atomic<uint32_t> batch_id_w_;
-    std::atomic<uint32_t> batch_id_r_;
+    std::atomic<uint32_t> w_batch_id_;
+    std::atomic<uint32_t> r_batch_id_;
     size_t thread_id_;
 };
 
@@ -177,30 +177,32 @@ public:
         uint64_t expected_lock = 0;
         for(auto &wset : write_set_){
             expected_lock = 0;
-            while (!wset.tuple_->lock_.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) 
+            while (!wset.tuple_->lock_.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) //lock取得
             {
                 expected_lock = 0;
             }
             // 条件チェック
-            if (wset.tuple_->w_tid_ < my_tid && wset.tuple_->batch_id_w_ == my_batch_id) 
+            if (wset.tuple_->w_tid_ < my_tid && wset.tuple_->w_batch_id_ == my_batch_id) //すでに他のsmall tidを持つTxによってreservationされていて、reservationが失敗する場合
             {
                 wset.tuple_->lock_.store(0, std::memory_order_release); 
                 continue;
             }
-            if(wset.tuple_->w_tid_ == my_tid && wset.tuple_->batch_id_w_ == my_batch_id){
+            if(wset.tuple_->w_tid_ == my_tid && wset.tuple_->w_batch_id_ == my_batch_id) //自身によってすでにreservationされているdata項目に繰り返しreservationを試みた場合
+            {
                 wset.tuple_->lock_.store(0, std::memory_order_release);
                 continue;
             }
-            if (wset.tuple_->w_tid_ > my_tid || wset.tuple_->batch_id_w_ < my_batch_id ||wset.tuple_->w_tid_ == 0)
+            if (wset.tuple_->w_tid_ > my_tid || wset.tuple_->w_batch_id_ < my_batch_id ||wset.tuple_->w_tid_ == 0) //reservationが成功する場合
             {
-                wset.tuple_->w_tid_ = my_tid;
-                wset.tuple_->thread_id_ = my_thread_id;
-                if(wset.tuple_->batch_id_w_ < my_batch_id){
-                    wset.tuple_->batch_id_w_ = my_batch_id;
+                wset.tuple_->w_tid_ = my_tid; //w_tid_の更新
+                wset.tuple_->thread_id_ = my_thread_id; //thread_id_の更新
+                if(wset.tuple_->w_batch_id_ < my_batch_id) //そのbatch内において初めてw_tid_の更新が行われる場合にw_batch_id_も更新する
+                {
+                    wset.tuple_->w_batch_id_ = my_batch_id;
                 }
                 
             }
-            wset.tuple_->lock_.store(0, std::memory_order_release);
+            wset.tuple_->lock_.store(0, std::memory_order_release); //unlock
         }
         return ;
     }
@@ -210,28 +212,30 @@ public:
         uint64_t expected_lock = 0;
         for(auto &rset : read_set_){
             expected_lock = 0;
-            while (!rset.tuple_->lock_.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) 
+            while (!rset.tuple_->lock_.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) //lock取得
             {
                 expected_lock = 0; 
             }
             // 条件チェック
-            if (rset.tuple_->r_tid_ < my_tid && rset.tuple_->batch_id_r_ == my_batch_id) 
+            if (rset.tuple_->r_tid_ < my_tid && rset.tuple_->r_batch_id_ == my_batch_id) //すでに他のsmall tidを持つTxによってreservationされていて、reservationが失敗する場合
             {
                 rset.tuple_->lock_.store(0, std::memory_order_release); 
                 continue;
             }
-            if(rset.tuple_->r_tid_ == my_tid && rset.tuple_->batch_id_r_ == my_batch_id){
+            if(rset.tuple_->r_tid_ == my_tid && rset.tuple_->r_batch_id_ == my_batch_id) //自身によってすでにreservationされているdata項目に繰り返しreservationを試みた場合
+            {
                 rset.tuple_->lock_.store(0, std::memory_order_release);
                 continue;
             }
-            if (rset.tuple_->r_tid_ > my_tid || rset.tuple_->batch_id_r_ < my_batch_id || rset.tuple_->r_tid_ == 0) 
+            if (rset.tuple_->r_tid_ > my_tid || rset.tuple_->r_batch_id_ < my_batch_id || rset.tuple_->r_tid_ == 0) //reservationが成功する場合
             {
-                rset.tuple_->r_tid_ = my_tid;
-                if(rset.tuple_->batch_id_r_ < my_batch_id){
-                    rset.tuple_->batch_id_r_ = my_batch_id;
+                rset.tuple_->r_tid_ = my_tid; //r_tid_の更新
+                if(rset.tuple_->r_batch_id_ < my_batch_id) //そのbatch内において初めてr_tid_の更新が行われる場合にr_batch_id_も更新する
+                {
+                    rset.tuple_->r_batch_id_ = my_batch_id;
                 }
             }
-            rset.tuple_->lock_.store(0, std::memory_order_release);
+            rset.tuple_->lock_.store(0, std::memory_order_release); //unlock
         }
         return ;
     }
@@ -239,7 +243,7 @@ public:
     bool WAW(uint32_t my_tid, uint32_t my_batch_id)
     {
         for(auto &wset : write_set_){
-            if(wset.tuple_->w_tid_ != my_tid || wset.tuple_->batch_id_w_ != my_batch_id)
+            if(wset.tuple_->w_tid_ != my_tid || wset.tuple_->w_batch_id_ != my_batch_id) //wawが存在する場合
             {
                 return true;
             }
@@ -250,8 +254,7 @@ public:
     bool RAW(uint32_t my_tid, uint32_t my_batch_id,std::array<uint32_t, THREAD_NUM>& aborted_list)
     {
         for(auto &rset : read_set_){
-
-            if(my_tid > rset.tuple_->w_tid_ && rset.tuple_->batch_id_w_ == my_batch_id && rset.tuple_->w_tid_ != 0)
+            if(my_tid > rset.tuple_->w_tid_ && rset.tuple_->w_batch_id_ == my_batch_id && rset.tuple_->w_tid_ != 0) //rawが存在する場合
             {
                 if(aborted_list[rset.tuple_->thread_id_] == 0){
                     return true;
@@ -265,7 +268,7 @@ public:
     bool WAR(uint32_t my_tid, uint32_t my_batch_id,std::array<uint32_t, THREAD_NUM>& aborted_list)
     {
         for(auto &wset : write_set_){
-            if(my_tid > wset.tuple_->r_tid_ && wset.tuple_->batch_id_r_ == my_batch_id && wset.tuple_->r_tid_ != 0)
+            if(my_tid > wset.tuple_->r_tid_ && wset.tuple_->w_batch_id_ == my_batch_id && wset.tuple_->r_tid_ != 0) //warが存在する場合
             {
                 return true;
             }
@@ -336,8 +339,8 @@ void makeDB()
         Table[i].value_ = 0;
         Table[i].r_tid_ = 0;
         Table[i].w_tid_ = 0;
-        Table[i].batch_id_w_ = 0;
-        Table[i].batch_id_r_ = 0;
+        Table[i].w_batch_id_ = 0;
+        Table[i].r_batch_id_ = 0;
         Table[i].thread_id_ = 0;
     }
 }
