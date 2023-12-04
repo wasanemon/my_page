@@ -364,8 +364,9 @@ POINT:
     {
 //sequencing layer starts
 
-    //１つ前のepochにおいて、abortしていなかった場合、新たなTxを実行する
+    //１つ前のepochにおいて、abortしていなかった場合、新たなTxを取得、実行する
         if(trans.status_ != Status::ABORTED){
+            //以下のTx取得について、内田さんの手法を使わせていただいています
             // aquire giant lock
             if (!lock_for_locks.w_try_lock())
             {
