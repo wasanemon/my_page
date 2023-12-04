@@ -57,6 +57,7 @@ public:
     Task(Ope ope, uint64_t key) : ope_(ope), key_(key) {}
 };
 
+//transaction取得においてのみ用いる
 class RWLock
 {
 public:
