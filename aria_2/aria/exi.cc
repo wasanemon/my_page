@@ -245,7 +245,8 @@ public:
     bool WAW(uint32_t my_tid, uint32_t my_batch_id)
     {
         for(auto &wset : write_set_){
-            if(wset.tuple_->w_tid_ != my_tid || wset.tuple_->w_batch_id_ != my_batch_id){
+            if(wset.tuple_->w_tid_ != my_tid || wset.tuple_->w_batch_id_ != my_batch_id) //wawの確認
+            {
                 return true;
             }
         }
@@ -255,7 +256,7 @@ public:
     bool RAW(uint32_t my_tid, uint32_t my_batch_id)
     {
         for(auto &rset : read_set_){
-            if(my_tid > rset.tuple_->w_tid_ && rset.tuple_->w_batch_id_ == my_batch_id && rset.tuple_->w_tid_ != 0)
+            if(my_tid > rset.tuple_->w_tid_ && rset.tuple_->w_batch_id_ == my_batch_id && rset.tuple_->w_tid_ != 0) //rawの確認
             {
                     return true;
             }
@@ -266,7 +267,7 @@ public:
     bool WAR(uint32_t my_tid, uint32_t my_batch_id)
     {
         for(auto &wset : write_set_){
-            if(my_tid > wset.tuple_->r_tid_ && wset.tuple_->r_batch_id_ == my_batch_id && wset.tuple_->r_tid_ != 0)
+            if(my_tid > wset.tuple_->r_tid_ && wset.tuple_->r_batch_id_ == my_batch_id && wset.tuple_->r_tid_ != 0) //warの確認
             {
                     return true;
             }

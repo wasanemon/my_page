@@ -257,7 +257,7 @@ public:
         for(auto &rset : read_set_){
             if(my_tid > rset.tuple_->w_tid_ && rset.tuple_->w_batch_id_ == my_batch_id && rset.tuple_->w_tid_ != 0) //rawが存在する場合
             {
-                if(aborted_list[rset.tuple_->thread_id_] == 0) //対象のdata項目をreservationしていたTxがabortしている場合
+                if(aborted_list[rset.tuple_->thread_id_] == 0) //対象のdata項目をreservationしていたTxがabortしていた場合、rawにはならない
                 {
                     return true;
                 }
