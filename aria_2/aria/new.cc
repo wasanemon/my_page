@@ -392,8 +392,6 @@ POINT:
         aborted_list[thread_id] = 0;
         sleep_flg = 0;
         trans.begin();
-       
-//concurrency control phase
 
     //execution phase
         //make R&W-set
@@ -418,21 +416,25 @@ POINT:
             }
         }
 
+        //実行しているTxのtid,Txが実行されているbatch_id、Txを実行しているthread_idを引数にとる
         trans.ReserveWrite(tid, batch_id, thread_id);
     
-        //同期ポイント① waiting for write reservation
+        //同期ポイント① batch内の全てTxのWriteReservationが終了するのを待つ
         sync_point.arrive_and_wait();
 
+        //実行しているTxのtid,Txが実行されているbatch_idを引数にとる
         if(trans.WAW(tid, batch_id))
         {   
             trans.status_ = Status::ABORTED;
+            //wawによりabortした場合は、対応するabort_listの要素を1にして、他のthreadに自身がabortしたことを伝える
             aborted_list[thread_id] = 1;
         }else{
+            //abortしなかった場合はReadReservationを実行する
             trans.ReserveRead(tid, batch_id);
         }
 
         
-        //同期ポイント② waiting for checking WAW & read reservation
+        //同期ポイント② batch内の全てのTxの、wawによるabort、もしくはReadReservationが終わるのを待つ
         sync_point.arrive_and_wait();
 
         //use reordering
