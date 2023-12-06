@@ -425,6 +425,7 @@ POINT:
         //実行しているTxのtid,Txが実行されているbatch_idを引数にとる
         if(trans.WAW(tid, batch_id))
         {   
+            //wawがあった場合はabort
             trans.status_ = Status::ABORTED;
             //wawによりabortした場合は、対応するabort_listの要素を1にして、他のthreadに自身がabortしたことを伝える
             aborted_list[thread_id] = 1;
@@ -437,13 +438,16 @@ POINT:
         //同期ポイント② batch内の全てのTxの、wawによるabort、もしくはReadReservationが終わるのを待つ
         sync_point.arrive_and_wait();
 
-        //use reordering
+        //Reorderingを行う
         if(trans.status_ != Status::ABORTED)
         {
+            //最初にRAWを持つか確認
             if(trans.RAW(tid, batch_id, aborted_list))
             {
+                //RAWを持つ場合、WARを確認
                 if(trans.WAR(tid, batch_id, aborted_list))
                 {
+                    //両方持っていた場合、abort、片方しか持たない場合は、reorderingによりcommit
                     trans.status_ = Status::ABORTED;
                 }
             }
@@ -456,9 +460,8 @@ POINT:
             trans.update();
             trans.commit();
         }
-        //同期ポイント③ waiting for update
+        //同期ポイント③ commitしたtransactionによるupdateを待つ
         sync_point.arrive_and_wait();
-        
         
         if (!__atomic_load_n(&quit, __ATOMIC_SEQ_CST) && trans.status_ != Status::ABORTED)
         {
@@ -466,9 +469,8 @@ POINT:
         }
         
     }
-
+    //quit == trueがmain関数内でなされた時に、全てのthreadがworker関数を適切に修了するためのもの。他のthreadが、同期ポイントで永遠に待つことがないようにする。
     sync_point.arrive_and_drop();
-
 }
 
 int main(int argc, char *argv[]) 

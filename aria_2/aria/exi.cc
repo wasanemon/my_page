@@ -173,29 +173,34 @@ public:
         return;
     }
 
+    //write reservationを実行する関数。関数を実行するTxのtid(my_tid)、そのTxが実行されているbatch_id(my_batch_id)を引数にとる
     void ReserveWrite(uint32_t my_tid, uint32_t my_batch_id) 
     {
         uint64_t expected_lock = 0;
         for(auto &wset : write_set_)
         {
             expected_lock = 0;
+            //lockを取得できるまで先に進まない
             while (!wset.tuple_->lock_.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) //lock取得
             {
                 expected_lock = 0;
             }
-            // 条件チェック
-            if (wset.tuple_->w_tid_ < my_tid && wset.tuple_->w_batch_id_ == my_batch_id) //すでに他のsmall tidを持つTxによってreservationされていて、reservationが失敗する場合
+            //すでに同一batch内の自身より小さいtidを持つTxによってreservationされていて、reservationが失敗する場合
+            if (wset.tuple_->w_tid_ < my_tid && wset.tuple_->w_batch_id_ == my_batch_id) 
             {
                 wset.tuple_->lock_.store(0, std::memory_order_release); 
                 continue;
             }
-            if(wset.tuple_->w_tid_ == my_tid && wset.tuple_->w_batch_id_ == my_batch_id) //自身によってすでにreservationされているdata項目に繰り返しreservationを試みた場合
+            //同一batch内で自身によってすでにreservationされているdata項目に繰り返しreservationを試みた場合
+            if(wset.tuple_->w_tid_ == my_tid && wset.tuple_->w_batch_id_ == my_batch_id)
             {
                 wset.tuple_->lock_.store(0, std::memory_order_release);
                 continue;
             }
 
-            if (wset.tuple_->w_tid_ > my_tid || wset.tuple_->w_batch_id_ < my_batch_id ||wset.tuple_->w_tid_ == 0) //reservationが成功する場合
+            //write set内のdata itemについて、引数のmy_tidとそのdata itemのw_tidを比較し、my_tidがw_tidよりも小さければ、my_tidでw_tidを更新する
+            //例外 : w_tidが以前のbatchにおいて書かれていたものであった場合、もしくはw_tidが初期値だった場合においては、tidの大小関係に関わらずw_tidを更新する
+            if (wset.tuple_->w_tid_ > my_tid || wset.tuple_->w_batch_id_ < my_batch_id ||wset.tuple_->w_tid_ == 0)
             {
                 wset.tuple_->w_tid_ = my_tid; //w_tid_の更新
                 if(wset.tuple_->w_batch_id_ < my_batch_id) //そのbatch内において初めてw_tid_の更新が行われる場合にw_batch_id_も更新する
@@ -209,30 +214,38 @@ public:
         return ;
     }
 
+    //read reservationを実行する関数。関数を実行するTxのtid(my_tid)、そのTxが実行されているbatch_id(my_batch_id)を引数にとる
     void ReserveRead(uint32_t my_tid,  uint32_t my_batch_id) 
     {
         uint64_t expected_lock = 0;
+        //lockを取得できるまで進まない
         for(auto &rset : read_set_){
             expected_lock = 0;
             while (!rset.tuple_->lock_.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) //lock取得
             {
                 expected_lock = 0; 
             }
-            // 条件チェック
-            if (rset.tuple_->r_tid_ < my_tid && rset.tuple_->r_batch_id_ == my_batch_id) //すでに他のsmall tidを持つTxによってreservationされていて、reservationが失敗する場合
+
+            //すでに同一batch内の自身より小さいtidを持つTxによってreservationされていて、reservationが失敗する場合
+            if (rset.tuple_->r_tid_ < my_tid && rset.tuple_->r_batch_id_ == my_batch_id)
             {
                 rset.tuple_->lock_.store(0, std::memory_order_release); 
                 continue;
             }
-            if(rset.tuple_->r_tid_ == my_tid && rset.tuple_->r_batch_id_ == my_batch_id) //自身によってすでにreservationされているdata項目に繰り返しreservationを試みた場合
+
+            //同一batch内で自身によってすでにreservationされているdata項目に繰り返しreservationを試みた場合
+            if(rset.tuple_->r_tid_ == my_tid && rset.tuple_->r_batch_id_ == my_batch_id) 
             {
                 rset.tuple_->lock_.store(0, std::memory_order_release);
                 continue;
             }
+            //read set内のdata itemについて、引数のmy_tidとそのdata itemのr_tidを比較し、my_tidがr_tidよりも小さければ、my_tidでr_tidを更新する
+            //例外 : r_tidが以前のbatchにおいて書かれていたものであった場合、もしくはr_tidが初期値だった場合においては、tidの大小関係に関わらずr_tidを更新する
             if (rset.tuple_->r_tid_ > my_tid || rset.tuple_->r_batch_id_ < my_batch_id || rset.tuple_->r_tid_ == 0) //reservationが成功する場合
             {
                 rset.tuple_->r_tid_ = my_tid; //r_tid_の更新
-                if(rset.tuple_->r_batch_id_ < my_batch_id) //そのbatch内において初めてr_tid_の更新が行われる場合にr_batch_id_も更新する
+                //そのbatch内において初めてr_tid_の更新が行われる場合にr_batch_id_も更新する
+                if(rset.tuple_->r_batch_id_ < my_batch_id) 
                 {
                     rset.tuple_->r_batch_id_ = my_batch_id;
                 }
@@ -242,8 +255,10 @@ public:
         return ;
     }
 
+    //関数を実行するTxのtid(my_tid)、そのTxが実行されているbatch_id(my_batch_id)を引数にとる
     bool WAW(uint32_t my_tid, uint32_t my_batch_id)
     {
+        //関数を実行したTxのwrite set内のdataのw_tidと引数にとったmy_tidを比較する。
         for(auto &wset : write_set_){
             if(wset.tuple_->w_tid_ != my_tid || wset.tuple_->w_batch_id_ != my_batch_id) //wawの確認
             {
@@ -253,8 +268,10 @@ public:
         return false;
     }
 
+    //関数を実行するTxのtid(my_tid)、そのTxが実行されているbatch_id(my_batch_id)を引数にとる
     bool RAW(uint32_t my_tid, uint32_t my_batch_id)
     {
+        //関数を実行したTxのread set内のdataのw_tidと引数にとったmy_tidを比較する。
         for(auto &rset : read_set_){
             if(my_tid > rset.tuple_->w_tid_ && rset.tuple_->w_batch_id_ == my_batch_id && rset.tuple_->w_tid_ != 0) //rawの確認
             {
@@ -264,8 +281,10 @@ public:
         return false;
     }
 
+    //関数を実行するTxのtid(my_tid)、そのTxが実行されているbatch_id(my_batch_id)を引数にとる
     bool WAR(uint32_t my_tid, uint32_t my_batch_id)
     {
+        //関数を実行したTxのwrite set内のdataのr_tidと引数にとったmy_tidを比較する。
         for(auto &wset : write_set_){
             if(my_tid > wset.tuple_->r_tid_ && wset.tuple_->r_batch_id_ == my_batch_id && wset.tuple_->r_tid_ != 0) //warの確認
             {
@@ -381,7 +400,7 @@ POINT:
             __atomic_store_n(&tx_counter, tx_pos + 1, __ATOMIC_SEQ_CST);
             lock_for_locks.w_unlock();
         }
-    //Txの実行内容、tidの割り当て、batch_idのインクリメント
+    //Txの実行内容(task_set)の取得、tidの取得、batch_idの更新
         Pre &work_tx = Pre_tx_set[tx_pos].first;
         trans.task_set_ = work_tx.task_set_;
         uint32_t tid = Pre_tx_set[tx_pos].second;
@@ -426,21 +445,19 @@ POINT:
         {
             trans.status_ = Status::ABORTED;
         }
-
-    //WAW() == Falseの場合のみ
-    //check war & raw conflict (reordering)
+    //WAW関数においてabortしなかったTxのみ、WAR & RAWを実行する。Reordering
         if(trans.status_ != Status::ABORTED)
         {
             if(trans.RAW(tid, batch_id))
             {
                 if(trans.WAR(tid, batch_id))
                 {
-                    //RAW() == True && WAR() == Trueの場合に、Reordering失敗,
+                    //RAW() と WAR() が両方Trueの場合に、Reordering失敗,abortとなる
                     trans.status_ = Status::ABORTED;
                 }
             }
         }
-    //commit & update or abort
+    //commitしたTxはupdateを実行
         if(trans.status_ == Status::ABORTED)
         {
             trans.abort();
@@ -457,8 +474,7 @@ POINT:
         }
 
     }
-    
-　　　//各threadがworker関数を抜ける際に、他の同期ポイントで永遠に待つことがないようにするためのもの
+    //各threadがworker関数を抜ける際に、他の同期ポイントで永遠に待つことがないようにするためのもの
     sync_point.arrive_and_drop();
 }
 
