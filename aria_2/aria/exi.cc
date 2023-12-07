@@ -21,7 +21,7 @@
 #define RW_RATE 50
 #define EX_TIME 3
 #define PRE_NUM 1000000
-#define SLEEP_TIME 1000000
+#define SLEEP_TIME 10
 #define SLEEP_TIME_INIT 2900 * 1000
 #define SKEW_PAR 0.0
 #define BACKOFF_TIME 0
