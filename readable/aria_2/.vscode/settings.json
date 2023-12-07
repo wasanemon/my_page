@@ -87,6 +87,5 @@
         "__tree": "cpp",
         "filesystem": "cpp",
         "barrier": "cpp"
-    },
-    "C_Cpp.autoAddFileAssociations": true
+    }
 }
