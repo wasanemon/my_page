@@ -22,7 +22,6 @@
 #include <barrier>
 #include <array>
 
-extern Tuple *Table;
 uint64_t tx_counter = 0;
 std::array<uint32_t, THREAD_NUM> aborted_list = {};
 std::vector<std::pair<Pre, uint32_t>> Pre_tx_set(PRE_NUM);
@@ -31,7 +30,7 @@ RWLock lock_for_assign_tx;
 
 void worker(int thread_id, int &ready, const bool &start, const bool &quit, std::barrier<> &sync_point)
 {
-    Result &myres = std::ref(AllResult[thread_id]);
+    Result &myresult = std::ref(AllResult[thread_id]);
     Transaction trans;
     uint64_t tx_pos;
     uint32_t tid;
@@ -146,7 +145,7 @@ POINT:
 
         if (!__atomic_load_n(&quit, __ATOMIC_SEQ_CST) && trans.status_ != Status::ABORTED)
         {
-            myres.commit_cnt_++;
+            myresult.commit_cnt_++;
         }
     }
     // quit == trueがmain関数内でなされた時に、全てのthreadがworker関数を適切に修了するためのもの。他のthreadが、同期ポイントで永遠に待つことがないようにする。
