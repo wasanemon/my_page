@@ -22,7 +22,6 @@
 #include <barrier>
 #include <array>
 
-extern Tuple *Table;
 uint64_t tx_counter = 0;
 std::vector<std::pair<Pre, uint32_t>> Pre_tx_set(PRE_NUM);
 std::vector<Result> AllResult(THREAD_NUM);
