@@ -1,4 +1,0 @@
-cmake cmake-curses-gui
-libboost-filesystem-dev
-libgflags-dev
-libgoogle-glog-dev
