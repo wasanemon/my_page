@@ -286,12 +286,14 @@ public:
 
     void commit()
     {
+        task_set_.clear();
         read_set_.clear();
         write_set_.clear();
         return;
     }
     void abort()
     {
+        task_set_.clear();
         read_set_.clear();
         write_set_.clear();
         return;
