@@ -406,8 +406,7 @@ POINT:
             lock_for_locks.w_unlock();
         }
         // Txの実行内容(task_set)の取得、tidの取得、batch_idの更新
-        Pre &work_tx = Pre_tx_set[tx_pos].first;
-        trans.task_set_ = work_tx.task_set_;
+        trans.task_set_ = Pre_tx_set[tx_pos].first.task_set_;
         uint32_t tid = Pre_tx_set[tx_pos].second;
         batch_id++;
         sleep_flg = 0;

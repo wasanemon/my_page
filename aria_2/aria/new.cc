@@ -386,8 +386,7 @@ POINT:
        
 
         // pre_tx_setからコピー
-        Pre &work_tx = Pre_tx_set[tx_pos].first;
-        trans.task_set_ = work_tx.task_set_;
+        trans.task_set_ = Pre_tx_set[tx_pos].first.task_set_;
         // uint64_t operation_count = 0;
         uint32_t tid = Pre_tx_set[tx_pos].second;
         batch_id++;
