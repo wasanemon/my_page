@@ -17,15 +17,19 @@
 #define PAGE_SIZE 4096
 #define THREAD_NUM 64
 #define TUPLE_NUM 1000000
-#define MAX_OPE 10
-#define RW_RATE 50
+#define MAX_OPE 100
+#define RW_RATE 95
 #define EX_TIME 3
-#define PRE_NUM 1000000
-#define SLEEP_TIME 10
+#define PRE_NUM 100000
+#define SLEEP_TIME 0
 #define SLEEP_TIME_INIT 2900 * 1000
-#define SKEW_PAR 0.0
+//#define SKEW_PAR 0.80
 #define BACKOFF_TIME 0
-#define SLEEP_RATE 1
+#define SLEEP_RATE 0
+
+double SKEW_PAR = 0.99;
+
+
 
 uint64_t tx_counter;
 
@@ -92,7 +96,8 @@ RWLock lock_for_locks;
 class Tuple
 {
 public:
-    std::atomic<uint64_t> lock_;
+    std::atomic<uint64_t> w_lock_;
+    std::atomic<uint64_t> r_lock_;
     uint64_t value_;
     std::atomic<uint32_t> r_tid_;
     std::atomic<uint32_t> w_tid_;
@@ -181,20 +186,21 @@ public:
         {
             expected_lock = 0;
             // lockを取得できるまで先に進まない
-            while (!wset.tuple_->lock_.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) // lock取得
+
+            while (!wset.tuple_->w_lock_.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) // lock取得
             {
                 expected_lock = 0;
             }
             // すでに同一batch内の自身より小さいtidを持つTxによってreservationされていて、reservationが失敗する場合
             if (wset.tuple_->w_tid_ < my_tid && wset.tuple_->w_batch_id_ == my_batch_id)
             {
-                wset.tuple_->lock_.store(0, std::memory_order_release);
+                wset.tuple_->w_lock_.store(0, std::memory_order_release);
                 continue;
             }
             // 同一batch内で自身によってすでにreservationされているdata項目に繰り返しreservationを試みた場合
             if (wset.tuple_->w_tid_ == my_tid && wset.tuple_->w_batch_id_ == my_batch_id)
             {
-                wset.tuple_->lock_.store(0, std::memory_order_release);
+                wset.tuple_->w_lock_.store(0, std::memory_order_release);
                 continue;
             }
 
@@ -209,7 +215,7 @@ public:
                 }
             }
 
-            wset.tuple_->lock_.store(0, std::memory_order_release); // unlock
+            wset.tuple_->w_lock_.store(0, std::memory_order_release); // unlock
         }
         return;
     }
@@ -222,7 +228,7 @@ public:
         for (auto &rset : read_set_)
         {
             expected_lock = 0;
-            while (!rset.tuple_->lock_.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) // lock取得
+            while (!rset.tuple_->r_lock_.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) // lock取得
             {
                 expected_lock = 0;
             }
@@ -230,14 +236,14 @@ public:
             // すでに同一batch内の自身より小さいtidを持つTxによってreservationされていて、reservationが失敗する場合
             if (rset.tuple_->r_tid_ < my_tid && rset.tuple_->r_batch_id_ == my_batch_id)
             {
-                rset.tuple_->lock_.store(0, std::memory_order_release);
+                rset.tuple_->r_lock_.store(0, std::memory_order_release);
                 continue;
             }
 
             // 同一batch内で自身によってすでにreservationされているdata項目に繰り返しreservationを試みた場合
             if (rset.tuple_->r_tid_ == my_tid && rset.tuple_->r_batch_id_ == my_batch_id)
             {
-                rset.tuple_->lock_.store(0, std::memory_order_release);
+                rset.tuple_->r_lock_.store(0, std::memory_order_release);
                 continue;
             }
             // read set内のdata itemについて、引数のmy_tidとそのdata itemのr_tidを比較し、my_tidがr_tidよりも小さければ、my_tidでr_tidを更新する
@@ -251,7 +257,7 @@ public:
                     rset.tuple_->r_batch_id_ = my_batch_id;
                 }
             }
-            rset.tuple_->lock_.store(0, std::memory_order_release);
+            rset.tuple_->r_lock_.store(0, std::memory_order_release);
         }
         return;
     }
@@ -336,11 +342,11 @@ void makeTask(std::vector<Task> &tasks, Xoroshiro128Plus &rnd, FastZipf &zipf)
         assert(random_gen_key < TUPLE_NUM);
         if ((rnd.next() % 100) < RW_RATE)
         {
-            tasks.emplace_back(Ope::READ, random_gen_key + 1);
+            tasks.emplace_back(Ope::READ, random_gen_key );
         }
         else
         {
-            tasks.emplace_back(Ope::WRITE, random_gen_key + 1);
+            tasks.emplace_back(Ope::WRITE, random_gen_key );
         }
     }
 }
@@ -359,7 +365,8 @@ void makeDB()
     posix_memalign((void **)&Table, PAGE_SIZE, TUPLE_NUM * sizeof(Tuple));
     for (int i = 0; i < TUPLE_NUM; i++)
     {
-        Table[i].lock_ = 0;
+        Table[i].w_lock_ = 0;
+        Table[i].r_lock_ = 0;
         Table[i].value_ = 0;
         Table[i].r_tid_ = 0;
         Table[i].w_tid_ = 0;
@@ -368,6 +375,7 @@ void makeDB()
     }
 }
 
+std::atomic<uint64_t> tx_lock = 0;
 void worker(int thread_id, int &ready, const bool &start, const bool &quit, std::barrier<> &sync_point)
 {
     Result &myres = std::ref(AllResult[thread_id]);
@@ -375,6 +383,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
     uint32_t batch_id = 0;
     uint64_t tx_pos;
     uint64_t sleep_flg = 0;
+    uint64_t expected_lock = 0;
     __atomic_store_n(&ready, 1, __ATOMIC_SEQ_CST);
 
     // Thread starts
@@ -382,7 +391,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
     {
     }
 
-POINT:
+//POINT:
 
     while (!__atomic_load_n(&quit, __ATOMIC_SEQ_CST))
     {
@@ -392,29 +401,36 @@ POINT:
         if (trans.status_ != Status::ABORTED)
         {
             // aquire giant lock
-            if (!lock_for_locks.w_try_lock())
+            expected_lock = 0;
+            while (!tx_lock.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) // lock取得
             {
-                std::this_thread::sleep_for(std::chrono::microseconds(BACKOFF_TIME));
-                goto POINT;
+                expected_lock = 0;
             }
+            //if (!lock_for_locks.w_try_lock())
+            //{
+                //std::this_thread::sleep_for(std::chrono::microseconds(BACKOFF_TIME));
+                //goto POINT;
+            //}
             tx_pos = __atomic_load_n(&tx_counter, __ATOMIC_SEQ_CST);
             if (tx_pos >= PRE_NUM)
             {
                 return;
             }
             __atomic_store_n(&tx_counter, tx_pos + 1, __ATOMIC_SEQ_CST);
-            lock_for_locks.w_unlock();
+            //lock_for_locks.w_unlock();
+            tx_lock.store(0, std::memory_order_release);
         }
         // Txの実行内容(task_set)の取得、tidの取得、batch_idの更新
         trans.task_set_ = Pre_tx_set[tx_pos].first.task_set_;
         uint32_t tid = Pre_tx_set[tx_pos].second;
         batch_id++;
-        sleep_flg = 0;
+        //sleep_flg = 0;
         trans.begin();
         // sequencing layer ends
 
         // execution phase starts
         // make read & write set
+        
         for (auto &task : trans.task_set_)
         {
             switch (task.ope_)
@@ -433,16 +449,19 @@ POINT:
                 break;
             }
         }
+        
         // do W & R reservation
         trans.ReserveWrite(tid, batch_id);
         trans.ReserveRead(tid, batch_id);
+        
         // 性能計測用
-        if (sleep_flg == 1)
-        {
-            std::this_thread::sleep_for(std::chrono::microseconds(SLEEP_TIME));
-        }
+        //if (sleep_flg == 1)
+        //{
+            //std::this_thread::sleep_for(std::chrono::microseconds(SLEEP_TIME));
+        //}
         // execution phase ends
         sync_point.arrive_and_wait();
+        
 
         // commit phase starts
         // check waw conflict
@@ -462,6 +481,7 @@ POINT:
                 }
             }
         }
+
         // commitしたTxはupdateを実行
         if (trans.status_ == Status::ABORTED)
         {
@@ -469,7 +489,7 @@ POINT:
         }
         else
         {
-            trans.update();
+            //trans.update();
             trans.commit();
         }
         // commit phase ends
@@ -482,6 +502,7 @@ POINT:
     }
     // 各threadがworker関数を抜ける際に、他の同期ポイントで永遠に待つことがないようにするためのもの
     sync_point.arrive_and_drop();
+
 }
 
 int main(int argc, char *argv[])
@@ -516,6 +537,7 @@ int main(int argc, char *argv[])
         tx_make_count++;
         tid++;
     }
+    
 
     std::vector<int> readys;
     for (size_t i = 0; i < THREAD_NUM; ++i)
@@ -560,8 +582,9 @@ int main(int argc, char *argv[])
     {
         total_count += re.commit_cnt_;
     }
-    // float tps = total_count / (SLEEP_TIME_INIT / 1000 / 1000);
-    std::cout << "throughput exi:" << SLEEP_TIME << " " << total_count / EX_TIME << std::endl;
 
+    // float tps = total_count / (SLEEP_TIME_INIT / 1000 / 1000);
+    //std::cout << "throughput exi:" << SKEW_PAR << " " << total_count / EX_TIME << " " << result << " " <<  batch__ <<  std::endl;
+    std::cout << SKEW_PAR << " " << total_count / EX_TIME << std::endl;
     return 0;
 }

@@ -17,17 +17,17 @@
 #define PAGE_SIZE 4096
 #define THREAD_NUM 64
 #define TUPLE_NUM 1000000
-#define MAX_OPE 10
-#define RW_RATE 50
+#define MAX_OPE 100
+#define RW_RATE 95
 #define EX_TIME 3
-#define PRE_NUM 3000000
-#define SLEEP_TIME 1
+#define PRE_NUM 100000
+#define SLEEP_TIME 0
 #define SLEEP_TIME_INIT 2900 * 1000
-#define SKEW_PAR 0.0
+//#define SKEW_PAR 0.94
 #define BACKOFF_TIME 0
-#define SLEEP_RATE 1
+#define SLEEP_RATE 0
 
-
+double SKEW_PAR = 0.99;
 uint64_t tx_counter;
 std::array<uint32_t, THREAD_NUM> aborted_list = {};
 // DEFINE_uint64(tuple_num, 1000000, "Total number of records");
@@ -349,6 +349,8 @@ void makeDB()
     }
 }
 
+
+std::atomic<uint64_t> tx_lock = 0;
 void worker(int thread_id, int &ready, const bool &start, const bool &quit, std::barrier<> &sync_point)
 {
     Result &myres = std::ref(AllResult[thread_id]);
@@ -356,32 +358,36 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
     uint64_t tx_pos;
     uint32_t batch_id = 0;
     uint64_t sleep_flg = 0;
+    uint64_t expected_lock = 0;
     __atomic_store_n(&ready, 1, __ATOMIC_SEQ_CST);
     while (!__atomic_load_n(&start, __ATOMIC_SEQ_CST))
     {
     }
 
-POINT:
-
     while (!__atomic_load_n(&quit, __ATOMIC_SEQ_CST))
     {
+
         //前のbatchにおいてabortしていた場合は、同一のTxを実行
         if(trans.status_ != Status::ABORTED){
             // aquire giant lock
-            if (!lock_for_locks.w_try_lock())
+            while (!tx_lock.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) // lock取得
             {
-                std::this_thread::sleep_for(std::chrono::microseconds(BACKOFF_TIME));
-                goto POINT;
+                expected_lock = 0;
             }
-
-            // 取得すべきtxの現在地　ロック必要か
+            
+            //if (!lock_for_locks.w_try_lock())
+            //{
+                //std::this_thread::sleep_for(std::chrono::microseconds(BACKOFF_TIME));
+                //goto POINT;
+            //}
             tx_pos = __atomic_load_n(&tx_counter, __ATOMIC_SEQ_CST);
             if (tx_pos >= PRE_NUM)
             {
                 return;
             }
             __atomic_store_n(&tx_counter, tx_pos + 1, __ATOMIC_SEQ_CST);
-            lock_for_locks.w_unlock();
+            //lock_for_locks.w_unlock();
+            tx_lock.store(0, std::memory_order_release);
         }
        
 
@@ -391,7 +397,7 @@ POINT:
         uint32_t tid = Pre_tx_set[tx_pos].second;
         batch_id++;
         aborted_list[thread_id] = 0;
-        sleep_flg = 0;
+        //sleep_flg = 0;
         trans.begin();
 
     //execution phase
@@ -418,11 +424,10 @@ POINT:
         }
 
         //実行しているTxのtid,Txが実行されているbatch_id、Txを実行しているthread_idを引数にとる
+
         trans.ReserveWrite(tid, batch_id, thread_id);
-    
         //同期ポイント① batch内の全てTxのWriteReservationが終了するのを待つ
         sync_point.arrive_and_wait();
-
         //実行しているTxのtid,Txが実行されているbatch_idを引数にとる
         if(trans.WAW(tid, batch_id))
         {   
@@ -434,11 +439,8 @@ POINT:
             //abortしなかった場合はReadReservationを実行する
             trans.ReserveRead(tid, batch_id);
         }
-
-        
         //同期ポイント② batch内の全てのTxの、wawによるabort、もしくはReadReservationが終わるのを待つ
         sync_point.arrive_and_wait();
-
         //Reorderingを行う
         if(trans.status_ != Status::ABORTED)
         {
@@ -555,7 +557,7 @@ int main(int argc, char *argv[])
         total_count += re.commit_cnt_;
     }
     // float tps = total_count / (SLEEP_TIME_INIT / 1000 / 1000);
-    std::cout << "throughput new:" << SLEEP_TIME << " " << total_count / EX_TIME << std::endl;
-
+   //std::cout << "throughput exi:" << SKEW_PAR << " " << total_count / EX_TIME << " " << result << " " <<  batch__ <<  std::endl;
+     std::cout << SKEW_PAR << " " << total_count / EX_TIME << std::endl;
     return 0;
 }
