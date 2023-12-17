@@ -342,11 +342,19 @@ void makeTask(std::vector<Task> &tasks, Xoroshiro128Plus &rnd, FastZipf &zipf)
         assert(random_gen_key < TUPLE_NUM);
         if ((rnd.next() % 100) < RW_RATE)
         {
-            tasks.emplace_back(Ope::READ, random_gen_key );
+<<<<<<< HEAD
+            tasks.emplace_back(Ope::READ, random_gen_key);
         }
         else
         {
-            tasks.emplace_back(Ope::WRITE, random_gen_key );
+            tasks.emplace_back(Ope::WRITE, random_gen_key);
+=======
+            tasks.emplace_back(Ope::READ, random_gen_key);
+        }
+        else
+        {
+            tasks.emplace_back(Ope::WRITE, random_gen_key);
+>>>>>>> 023cacefbd0fdc44dcb08a7cd4e795ca08cf591f
         }
     }
 }
