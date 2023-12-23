@@ -17,17 +17,17 @@
 #define PAGE_SIZE 4096
 #define THREAD_NUM 64
 #define TUPLE_NUM 1000000
-#define MAX_OPE 10
-#define RW_RATE 50
+#define MAX_OPE 100
+#define RW_RATE 95
 #define EX_TIME 3
-#define PRE_NUM 1000000
+#define PRE_NUM 300000
 #define SLEEP_TIME 0
 #define SLEEP_TIME_INIT 2900 * 1000
 //#define SKEW_PAR 0.80
 #define BACKOFF_TIME 0
 #define SLEEP_RATE 0
 
-double SKEW_PAR = 0;
+double SKEW_PAR = 0.80;
 uint64_t tx_counter;
 std::array<std::atomic<uint32_t>, THREAD_NUM> aborted_list = {};
 // DEFINE_uint64(tuple_num, 1000000, "Total number of records");
@@ -73,7 +73,8 @@ public:
 class Tuple
 {
 public:
-    std::atomic<uint64_t> lock_;
+    std::atomic<uint64_t> w_lock_;
+    std::atomic<uint64_t> r_lock_;
     uint64_t value_;
     //std::atomic<uint32_t> r_tid_;
     std::atomic<uint32_t> w_tid_;
@@ -165,7 +166,7 @@ public:
         uint64_t expected_lock = 0;
         for(auto &wset : write_set_){
             expected_lock = 0;
-            while (!wset.tuple_->lock_.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) //lock取得
+            while (!wset.tuple_->w_lock_.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) //lock取得
             {
                 expected_lock = 0;
             }
@@ -176,12 +177,12 @@ public:
                 if(aborted_list[my_thread_id] == 0){
                     aborted_list[my_thread_id] = 1;
                 }
-                wset.tuple_->lock_.store(0, std::memory_order_release); 
+                wset.tuple_->w_lock_.store(0, std::memory_order_release); 
                 continue;
             }
             if(wset.tuple_->w_tid_ == my_tid && wset.tuple_->w_batch_id_ == my_batch_id) //自身によってすでにreservationされているdata項目に繰り返しreservationを試みた場合
             {
-                wset.tuple_->lock_.store(0, std::memory_order_release);
+                wset.tuple_->w_lock_.store(0, std::memory_order_release);
                 continue;
             }
             if (wset.tuple_->w_tid_ > my_tid || wset.tuple_->w_batch_id_ < my_batch_id || wset.tuple_->w_tid_ == 0) //reservationが成功する場合
@@ -198,7 +199,7 @@ public:
                 }
                 
             }
-            wset.tuple_->lock_.store(0, std::memory_order_release); //unlock
+            wset.tuple_->w_lock_.store(0, std::memory_order_release); //unlock
         }
         return ;
     }
@@ -208,12 +209,13 @@ public:
         uint64_t expected_lock = 0;
         for(auto &rset : read_set_){
             expected_lock = 0;
-            while (!rset.tuple_->lock_.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) //lock取得
+            if(aborted_list[my_thread_id] == 1){
+                return;
+            }
+            while (!rset.tuple_->r_lock_.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) //lock取得
             {
                 expected_lock = 0; 
-                if(aborted_list[my_thread_id] == 1){
-                    return;
-                }
+                
             }
 
             if (rset.tuple_->r_batch_id_ < my_batch_id) //batch内で最初にreservationが成功する場合
@@ -224,7 +226,7 @@ public:
                 rset.tuple_->ReadReservation_List[my_thread_id].ptrLargeNum = nullptr;
                 rset.tuple_->ReadReservation_List[my_thread_id].ptrSmallNum = &(rset.tuple_->NodeTuple);
                 rset.tuple_->r_batch_id_ = my_batch_id;
-                rset.tuple_->lock_.store(0, std::memory_order_release); 
+                rset.tuple_->r_lock_.store(0, std::memory_order_release); 
                 continue;
             }else{
                 ReservationNode* current = rset.tuple_->NodeTuple.ptrLargeNum;
@@ -235,28 +237,29 @@ public:
                     }
                     break;
                 }
-                if(current->ptrLargeNum != nullptr || current->r_tid_ > my_tid){
-                    if(current->r_tid_ == my_tid){
-                        rset.tuple_->lock_.store(0, std::memory_order_release);
-                        continue;
-                    }
+
+                if(current->r_tid_ == my_tid){//同じ項目に2回目のreservation
+                    rset.tuple_->r_lock_.store(0, std::memory_order_release);
+                    continue;
+                }
+
+                if(current->r_tid_ > my_tid){//２つのreservationの中間に挿入する場合
                     ReservationNode* previousReservation = current->ptrSmallNum;
                     previousReservation->ptrLargeNum = &(rset.tuple_->ReadReservation_List[my_thread_id]);
                     rset.tuple_->ReadReservation_List[my_thread_id].ptrLargeNum = current;
                     rset.tuple_->ReadReservation_List[my_thread_id].ptrSmallNum = previousReservation;
                     current->ptrSmallNum = &(rset.tuple_->ReadReservation_List[my_thread_id]);
                     rset.tuple_->ReadReservation_List[my_thread_id].r_tid_ = my_tid;
-                    rset.tuple_->lock_.store(0, std::memory_order_release);
+                    rset.tuple_->r_lock_.store(0, std::memory_order_release);
                     continue;
-                }else if(current->ptrLargeNum == nullptr && current->r_tid_ == my_tid){
-                    rset.tuple_->lock_.store(0, std::memory_order_release);
-                    continue;
-                }else if(current->ptrLargeNum == nullptr && current->r_tid_ < my_tid){
+                }
+    
+                if(current->r_tid_ < my_tid){
                     current->ptrLargeNum = &(rset.tuple_->ReadReservation_List[my_thread_id]);
                     rset.tuple_->ReadReservation_List[my_thread_id].ptrSmallNum = current;
                     rset.tuple_->ReadReservation_List[my_thread_id].ptrLargeNum = nullptr;
                     rset.tuple_->ReadReservation_List[my_thread_id].r_tid_ = my_tid;
-                    rset.tuple_->lock_.store(0, std::memory_order_release);
+                    rset.tuple_->r_lock_.store(0, std::memory_order_release);
                     continue;
                 }
             }
@@ -297,13 +300,14 @@ public:
                 continue;
             }
             ReservationNode* current = wset.tuple_->NodeTuple.ptrLargeNum;
-            //nodeがnull出ない時。nullの時は、自身より小さいreservationはない
+            //nodeがnullではない時。nullの時は、自身より小さいreservationはない
             while(current != nullptr){
                 if(current->r_tid_ == my_tid){//自身がreservationしてるnodeについたらOK
                     break;
                 }else if(current->r_tid_ < my_tid){//自身より小さいreservationに遭遇した場合、そのthreadがabortしていれば次に行ける。そうでなければWAR==trueで返す。
                     if(aborted_list[current->thread_id] == 1){
                         current = current->ptrLargeNum;
+                        continue;
                     }else{
                         return true;
                     }
@@ -376,7 +380,8 @@ void makeDB()
     posix_memalign((void **)&Table, PAGE_SIZE, TUPLE_NUM * sizeof(Tuple));
     for (int i = 0; i < TUPLE_NUM; i++)
     {
-        Table[i].lock_ = 0;
+        Table[i].r_lock_ = 0;
+        Table[i].w_lock_ = 0;
         Table[i].value_ = 0;
         Table[i].w_tid_ = 0;
         Table[i].w_batch_id_ = 0;
@@ -405,7 +410,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
     Transaction trans;
     uint64_t tx_pos;
     uint32_t batch_id = 0;
-    uint64_t sleep_flg = 0;
+    //uint64_t sleep_flg = 0;
     uint64_t expected_lock = 0;
     __atomic_store_n(&ready, 1, __ATOMIC_SEQ_CST);
     while (!__atomic_load_n(&start, __ATOMIC_SEQ_CST))
@@ -463,7 +468,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
                 // std::cout << "write" << std::endl;
                 break;
             case Ope::SLEEP:
-                sleep_flg = 1;
+                //sleep_flg = 1;
                 break;
             default:
                 std::cout << "fail" << std::endl;
@@ -476,11 +481,9 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
         trans.ReserveRead(tid, batch_id,thread_id, aborted_list);
         //同期ポイント② batch内の全てのTxの、wawによるabort、もしくはReadReservationが終わるのを待つ
         sync_point.arrive_and_wait();
-        if(aborted_list[thread_id] == 1){
-            trans.status_ = Status::ABORTED;
-        }
+
         //Reorderingを行う
-        if(trans.status_ != Status::ABORTED)
+        if(aborted_list[thread_id] != 1)
         {
             //最初にRAWを持つか確認
             if(trans.RAW(tid, batch_id, aborted_list))
@@ -489,13 +492,15 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
                 if(trans.WAR(tid, batch_id, aborted_list))
                 {
                     //両方持っていた場合、abort、片方しか持たない場合は、reorderingによりcommit
-                    trans.status_ = Status::ABORTED;
+                    aborted_list[thread_id] = 1;
                 }
             }
         }
+        //1.3
 
-        if(trans.status_ == Status::ABORTED)
+        if(aborted_list[thread_id] == 1)
         {
+            trans.status_ = Status::ABORTED;
             trans.abort();
         }else{
             trans.update();
