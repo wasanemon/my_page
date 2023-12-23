@@ -27,7 +27,7 @@
 #define BACKOFF_TIME 0
 #define SLEEP_RATE 0
 
-double SKEW_PAR = 0.80;
+double SKEW_PAR = 0.8;
 uint64_t tx_counter;
 std::array<std::atomic<uint32_t>, THREAD_NUM> aborted_list = {};
 // DEFINE_uint64(tuple_num, 1000000, "Total number of records");
@@ -285,6 +285,9 @@ public:
             {
                 if(aborted_list[rset.tuple_->thread_id_] == 0) //対象のdata項目をreservationしていたTxがabortしていた場合、rawにはならない
                 {
+                    if(my_tid == 5){
+                        cout << "RAW" << std::endl;
+                    }
                     return true;
                 }
             }
@@ -309,6 +312,9 @@ public:
                         current = current->ptrLargeNum;
                         continue;
                     }else{
+                        if(my_tid == 5){
+                            cout << "WAR" << std::endl;
+                        }
                         return true;
                     }
                 }else if(current->r_tid_ > my_tid){//自身より大きいreservationまでたどり着いたらOk
@@ -402,7 +408,7 @@ void makeDB()
     }
 }
 
-
+uint32_t batch;
 std::atomic<uint64_t> tx_lock = 0;
 void worker(int thread_id, int &ready, const bool &start, const bool &quit, std::barrier<> &sync_point)
 {
@@ -452,6 +458,9 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
         aborted_list[thread_id] = 0;
         //sleep_flg = 0;
         trans.begin();
+        if(thread_id == 1 && batch_id < 10){
+            cout << "batch = " << batch_id << std::endl;
+        }
 
     //execution phase
         //make R&W-set
@@ -492,17 +501,19 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
                 if(trans.WAR(tid, batch_id, aborted_list))
                 {
                     //両方持っていた場合、abort、片方しか持たない場合は、reorderingによりcommit
-                    aborted_list[thread_id] = 1;
+                    trans.status_ = Status::ABORTED;
                 }
             }
         }
         //1.3
-
-        if(aborted_list[thread_id] == 1)
+        if(aborted_list[thread_id] == 1 || trans.status_ == Status::ABORTED)
         {
             trans.status_ = Status::ABORTED;
             trans.abort();
         }else{
+            if(tid < 10){
+                cout << tid << " " << std::endl;
+            }
             trans.update();
             trans.commit();
         }
@@ -517,6 +528,8 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
     }
     //quit == trueがmain関数内でなされた時に、全てのthreadがworker関数を適切に修了するためのもの。他のthreadが、同期ポイントで永遠に待つことがないようにする。
     sync_point.arrive_and_drop();
+    batch = batch_id;
+    
 }
 
 int main(int argc, char *argv[]) 
@@ -543,7 +556,102 @@ int main(int argc, char *argv[])
     int tx_make_count = 0;
     for (auto &pre : Pre_tx_set)
     {
-        makeTask(pre.first.task_set_, rnd, zipf);
+        if(tx_make_count == 0){
+            pre.first.task_set_.emplace_back(Ope::WRITE, 1090);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 100);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 101);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 102);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 1000);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 10000);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 1010);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 102023);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 0);
+            pre.first.task_set_.emplace_back(Ope::READ, 0);
+            pre.first.task_set_.emplace_back(Ope::READ, 1);
+            pre.first.task_set_.emplace_back(Ope::READ, 2);
+            pre.first.task_set_.emplace_back(Ope::READ, 3);
+            pre.first.task_set_.emplace_back(Ope::READ, 4);
+            pre.first.task_set_.emplace_back(Ope::READ, 5);
+            pre.first.task_set_.emplace_back(Ope::READ, 6);
+        }
+        if(tx_make_count == 1){
+            pre.first.task_set_.emplace_back(Ope::WRITE, 100000);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 10100);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 102000);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 100100);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 1020);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 11);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 1);
+            pre.first.task_set_.emplace_back(Ope::READ, 4);
+            pre.first.task_set_.emplace_back(Ope::READ, 5);
+            pre.first.task_set_.emplace_back(Ope::READ, 6);
+            pre.first.task_set_.emplace_back(Ope::READ, 7);
+            pre.first.task_set_.emplace_back(Ope::READ, 8);
+            pre.first.task_set_.emplace_back(Ope::READ, 9);
+        }
+        if(tx_make_count == 2){
+            pre.first.task_set_.emplace_back(Ope::WRITE, 6);
+            pre.first.task_set_.emplace_back(Ope::READ, 1020);
+        }
+        if(tx_make_count == 3){
+            pre.first.task_set_.emplace_back(Ope::WRITE, 5);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 17);
+            pre.first.task_set_.emplace_back(Ope::READ, 1020);
+            pre.first.task_set_.emplace_back(Ope::READ, 1980);
+        }
+        if(tx_make_count == 4){
+            pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 18);
+            pre.first.task_set_.emplace_back(Ope::READ, 5);
+            pre.first.task_set_.emplace_back(Ope::READ, 1980);
+            pre.first.task_set_.emplace_back(Ope::READ, 19);
+        }
+        if(tx_make_count == 5){
+            pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
+            pre.first.task_set_.emplace_back(Ope::READ, 17);
+            pre.first.task_set_.emplace_back(Ope::READ, 1980);
+            pre.first.task_set_.emplace_back(Ope::READ, 18);
+            pre.first.task_set_.emplace_back(Ope::READ, 19);
+            pre.first.task_set_.emplace_back(Ope::READ, 20);
+            pre.first.task_set_.emplace_back(Ope::READ, 21);
+            pre.first.task_set_.emplace_back(Ope::READ, 22);
+            pre.first.task_set_.emplace_back(Ope::READ, 23);
+            pre.first.task_set_.emplace_back(Ope::READ, 24);
+            pre.first.task_set_.emplace_back(Ope::READ, 25);
+            pre.first.task_set_.emplace_back(Ope::READ, 26);
+            pre.first.task_set_.emplace_back(Ope::READ, 27);
+            
+        }
+        if(tx_make_count == 6){
+            pre.first.task_set_.emplace_back(Ope::WRITE, 19);
+            pre.first.task_set_.emplace_back(Ope::READ, 17);
+            pre.first.task_set_.emplace_back(Ope::READ, 1980);
+        }
+        if(tx_make_count == 7){
+            pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 198);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 1988);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 156);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 172);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 164);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 11);
+            pre.first.task_set_.emplace_back(Ope::WRITE, 1);
+            pre.first.task_set_.emplace_back(Ope::READ, 17);
+            pre.first.task_set_.emplace_back(Ope::READ, 1980);
+        }
+        if(tx_make_count == 8){
+            pre.first.task_set_.emplace_back(Ope::WRITE, 1342);
+            pre.first.task_set_.emplace_back(Ope::READ, 1342);
+            pre.first.task_set_.emplace_back(Ope::READ, 19);
+        }
+        if(tx_make_count == 9){
+            pre.first.task_set_.emplace_back(Ope::WRITE, 98);
+            pre.first.task_set_.emplace_back(Ope::READ, 134);
+            pre.first.task_set_.emplace_back(Ope::READ, 1877);
+        }
+        if(tx_make_count > 9){
+            makeTask(pre.first.task_set_, rnd, zipf);
+        }
         pre.second = tid;
         tx_make_count++;
         tid++;
@@ -595,5 +703,6 @@ int main(int argc, char *argv[])
     // float tps = total_count / (SLEEP_TIME_INIT / 1000 / 1000);
    //std::cout << "throughput exi:" << SKEW_PAR << " " << total_count / EX_TIME << " " << result << " " <<  batch__ <<  std::endl;
     std::cout << THREAD_NUM << " " << SKEW_PAR << " " << total_count / EX_TIME << std::endl;
+    cout << batch << std::endl;
     return 0;
 }

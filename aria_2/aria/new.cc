@@ -52,7 +52,6 @@ class Task
 public:
     Ope ope_;
     uint64_t key_;
-
     Task() : ope_(Ope::READ), key_(0) {}
 
     Task(Ope ope, uint64_t key) : ope_(ope), key_(key) {}
@@ -255,9 +254,12 @@ public:
 
     bool RAW(uint32_t my_tid, uint32_t my_batch_id, std::vector<uint32_t>& aborted_list)
     {
+        if(my_tid == 3){
+            //cout << "tid W3" << std::endl;
+        }
         for(auto &rset : read_set_){
             if(my_tid == 3){
-                cout << "tid 3" << rset.tuple_->w_tid_ << std::endl;
+                //cout << rset.tuple_->w_tid_ << std::endl;
             }
             if(my_tid > rset.tuple_->w_tid_ && rset.tuple_->w_batch_id_ == my_batch_id && rset.tuple_->w_tid_ != 0) //rawが存在する場合
             {
@@ -273,9 +275,12 @@ public:
 
     bool WAR(uint32_t my_tid, uint32_t my_batch_id,std::vector<uint32_t>& aborted_list)
     {
+        if(my_tid == 3){
+            //cout << "tid R3" << std::endl;
+        }
         for(auto &wset : write_set_){
             if(my_tid == 3){
-                cout << "tid 3" << wset.tuple_->r_tid_ << std::endl;
+                //cout << wset.tuple_->r_tid_ << std::endl;
             }
             if(my_tid > wset.tuple_->r_tid_ && wset.tuple_->r_batch_id_ == my_batch_id && wset.tuple_->r_tid_ != 0) //warが存在する場合
             {
@@ -378,6 +383,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
         //前のbatchにおいてabortしていた場合は、同一のTxを実行
         if(trans.status_ != Status::ABORTED){
             // aquire giant lock
+            expected_lock = 0;
             while (!tx_lock.compare_exchange_strong(expected_lock, 1, std::memory_order_acquire)) // lock取得
             {
                 expected_lock = 0;
@@ -410,6 +416,10 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, std:
         if(thread_id == 1 && batch_id < 10){
             cout << "batch = " << batch_id << std::endl;
         }
+        if(tid == 3){
+            //cout << "this" << tx_pos << std::endl;
+        }
+    
 
     //execution phase
         //make R&W-set
@@ -515,7 +525,7 @@ int main(int argc, char *argv[])
     int tx_make_count = 0;
     for (auto &pre : Pre_tx_set)
     {
-        if(tx_make_count == 1){
+        if(tx_make_count == 0){
             pre.first.task_set_.emplace_back(Ope::WRITE, 1090);
             pre.first.task_set_.emplace_back(Ope::WRITE, 100);
             pre.first.task_set_.emplace_back(Ope::WRITE, 101);
@@ -533,7 +543,7 @@ int main(int argc, char *argv[])
             pre.first.task_set_.emplace_back(Ope::READ, 5);
             pre.first.task_set_.emplace_back(Ope::READ, 6);
         }
-        if(tx_make_count == 2){
+        if(tx_make_count == 1){
             pre.first.task_set_.emplace_back(Ope::WRITE, 100000);
             pre.first.task_set_.emplace_back(Ope::WRITE, 10100);
             pre.first.task_set_.emplace_back(Ope::WRITE, 102000);
@@ -548,24 +558,24 @@ int main(int argc, char *argv[])
             pre.first.task_set_.emplace_back(Ope::READ, 8);
             pre.first.task_set_.emplace_back(Ope::READ, 9);
         }
-        if(tx_make_count == 3){
+        if(tx_make_count == 2){
             pre.first.task_set_.emplace_back(Ope::WRITE, 6);
             pre.first.task_set_.emplace_back(Ope::READ, 1020);
         }
-        if(tx_make_count == 4){
+        if(tx_make_count == 3){
             pre.first.task_set_.emplace_back(Ope::WRITE, 5);
             pre.first.task_set_.emplace_back(Ope::WRITE, 17);
             pre.first.task_set_.emplace_back(Ope::READ, 1020);
             pre.first.task_set_.emplace_back(Ope::READ, 1980);
         }
-        if(tx_make_count == 5){
+        if(tx_make_count == 4){
             pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
             pre.first.task_set_.emplace_back(Ope::WRITE, 18);
             pre.first.task_set_.emplace_back(Ope::READ, 5);
             pre.first.task_set_.emplace_back(Ope::READ, 1980);
             pre.first.task_set_.emplace_back(Ope::READ, 19);
         }
-        if(tx_make_count == 6){
+        if(tx_make_count == 5){
             pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
             pre.first.task_set_.emplace_back(Ope::READ, 17);
             pre.first.task_set_.emplace_back(Ope::READ, 1980);
@@ -581,12 +591,12 @@ int main(int argc, char *argv[])
             pre.first.task_set_.emplace_back(Ope::READ, 27);
             
         }
-        if(tx_make_count == 7){
+        if(tx_make_count == 6){
             pre.first.task_set_.emplace_back(Ope::WRITE, 19);
             pre.first.task_set_.emplace_back(Ope::READ, 17);
             pre.first.task_set_.emplace_back(Ope::READ, 1980);
         }
-        if(tx_make_count == 8){
+        if(tx_make_count == 7){
             pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
             pre.first.task_set_.emplace_back(Ope::WRITE, 198);
             pre.first.task_set_.emplace_back(Ope::WRITE, 1988);
@@ -598,17 +608,17 @@ int main(int argc, char *argv[])
             pre.first.task_set_.emplace_back(Ope::READ, 17);
             pre.first.task_set_.emplace_back(Ope::READ, 1980);
         }
-        if(tx_make_count == 9){
+        if(tx_make_count == 8){
             pre.first.task_set_.emplace_back(Ope::WRITE, 1342);
             pre.first.task_set_.emplace_back(Ope::READ, 1342);
             pre.first.task_set_.emplace_back(Ope::READ, 19);
         }
-        if(tx_make_count == 10){
+        if(tx_make_count == 9){
             pre.first.task_set_.emplace_back(Ope::WRITE, 98);
             pre.first.task_set_.emplace_back(Ope::READ, 134);
             pre.first.task_set_.emplace_back(Ope::READ, 1877);
         }
-        if(tx_make_count > 10){
+        if(tx_make_count > 9){
             makeTask(pre.first.task_set_, rnd, zipf);
         }
         pre.second = tid;
