@@ -15,18 +15,18 @@
 #include <mutex>
 
 #define PAGE_SIZE 4096
-#define THREAD_NUM 64
+#define THREAD_NUM 16
 #define TUPLE_NUM 2000000
-#define MAX_OPE 100
-#define RW_RATE 95
+#define MAX_OPE 10
+#define RW_RATE 50
 #define EX_TIME 3
-#define PRE_NUM 10000000
+#define PRE_NUM 20000000
 #define SLEEP_TIME 0
 #define SLEEP_TIME_INIT 2900 * 1000
 //#define SKEW_PAR 0.80
 #define BACKOFF_TIME 0
 #define SLEEP_RATE 0
-#define BATCH_SIZE 64
+#define BATCH_SIZE 480
 #define TX_PAR_THREAD BATCH_SIZE/THREAD_NUM
 
 double SKEW_PAR = 0;
@@ -216,8 +216,7 @@ public:
 
     void update()
     {
-        for (auto &wset : write_set_)
-        {
+        for(auto &wset : write_set_){
             wset.tuple_->value_ = wset.value_;
         }
         return;
@@ -431,6 +430,7 @@ std::atomic<uint64_t> tx_lock = 0;
 std::vector<uint64_t> abort_tid_list(BATCH_SIZE);
 std::atomic<int> abort_counter = 0;
 uint64_t new_tx_num = 0;
+uint64_t flg = 0;
 void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin_barrier& barrier)
 {
     Result &myres = std::ref(AllResult[thread_id]);
@@ -440,9 +440,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
         transactions.push_back(Transaction());
     }
     uint32_t batch_id = 0;
-    uint64_t tx_pos;
     uint64_t sleep_flg = 0;
-    uint64_t expected_lock = 0;
     uint64_t abort_index = 0;
     __atomic_store_n(&ready, 1, __ATOMIC_SEQ_CST);
 
@@ -477,8 +475,13 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
                 //sleep_flg = 0;
                 transactions[i].begin();
         }
+        barrier.wait(thread_id);
+        if(thread_id == THREAD_NUM - 1){
+            tx_counter += new_tx_num;
+            abort_counter = 0;
+        }
         batch_id++;
-        //if(thread_id == 1 && batch_id < 20){
+        //if(thread_id == 1 && batch_id < 70){
             //cout << "batch" << batch_id << std::endl;
         //}
         // sequencing layer ends
@@ -517,10 +520,9 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
         //}
         // execution phase ends
         barrier.wait(thread_id);
-        if(thread_id == THREAD_NUM - 1){
-            tx_counter += new_tx_num;
-            abort_counter = 0;
-        }
+        
+        
+        
 
         // commit phase starts
         // check waw conflict
@@ -547,15 +549,16 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
             {
                 abort_index = abort_counter.fetch_add(1);
                 abort_tid_list[abort_index] = transactions[i].tid_;
-                
+
                 transactions[i].abort();
             }
             else
             {
-                //if(transactions[i].tid_ < 39){
+                //if(transactions[i].tid_ < 100){
                     //cout << transactions[i].tid_ << std::endl;
                 //}
-                //trans.update();
+                
+                transactions[i].update();
                 transactions[i].commit();
             }
         }
@@ -945,8 +948,12 @@ int main(int argc, char *argv[])
             
             }
         }
-        //if(tx_make_count > 38){
-            makeTask(pre.first.task_set_, rnd, zipf);
+        if(tx_make_count < 0){
+            pre.first.task_set_.emplace_back(Ope::WRITE, 0);
+            pre.first.task_set_.emplace_back(Ope::READ, 0);
+        }
+        //if(tx_make_count >= 60){
+        makeTask(pre.first.task_set_, rnd, zipf);
         //}
         
         pre.second = tid;
@@ -1001,6 +1008,6 @@ int main(int argc, char *argv[])
 
     // float tps = total_count / (SLEEP_TIME_INIT / 1000 / 1000);
     //std::cout << "throughput exi:" << SKEW_PAR << " " << total_count / EX_TIME << " " << result << " " <<  batch__ <<  std::endl;
-    std::cout << THREAD_NUM << " " << batch << " " << total_count / EX_TIME << std::endl;
+    std::cout << THREAD_NUM << " " << BATCH_SIZE << " " << batch << " " << total_count / EX_TIME << std::endl;
     return 0;
 }

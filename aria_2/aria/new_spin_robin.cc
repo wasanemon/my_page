@@ -13,19 +13,21 @@
 #include <barrier>
 #include <array>
 
+
+
 #define PAGE_SIZE 4096
-#define THREAD_NUM 12
+#define THREAD_NUM 16
 #define TUPLE_NUM 1000000
 #define MAX_OPE 10
 #define RW_RATE 50
 #define EX_TIME 3
-#define PRE_NUM 10000000
+#define PRE_NUM 30000000
 #define SLEEP_TIME 0
 #define SLEEP_TIME_INIT 2900 * 1000
 //#define SKEW_PAR 0.80
 #define BACKOFF_TIME 0
 #define SLEEP_RATE 0
-#define BATCH_SIZE 120
+#define BATCH_SIZE 480
 #define TX_PAR_THREAD BATCH_SIZE/THREAD_NUM
 
 double SKEW_PAR = 0;
@@ -434,10 +436,8 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
     for (int i = 0; i < TX_PAR_THREAD; ++i) {
         transactions[i].tx_id_ = thread_id*TX_PAR_THREAD + i;
     }
-    uint64_t tx_pos;
     uint32_t batch_id = 0;
     uint64_t sleep_flg = 0;
-    uint64_t expected_lock = 0;
     uint64_t abort_index = 0;
     __atomic_store_n(&ready, 1, __ATOMIC_SEQ_CST);
     while (!__atomic_load_n(&start, __ATOMIC_SEQ_CST))
@@ -467,6 +467,11 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
                 //sleep_flg = 0;
                 transactions[i].begin();
                 aborted_list[transactions[i].tx_id_] = 0;
+        }
+        barrier.wait(thread_id);
+        if(thread_id == THREAD_NUM - 1){
+            tx_counter += new_tx_num;
+            abort_counter = 0;
         }
         batch_id++;
         //if(thread_id == 0 && batch_id < 20){
@@ -569,7 +574,6 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
                 myres.commit_cnt_++;
             }
         }
-        
     }
     //quit == trueがmain関数内でなされた時に、全てのthreadがworker関数を適切に修了するためのもの。他のthreadが、同期ポイントで永遠に待つことがないようにする。
     barrier.arrive_and_drop(thread_id);
@@ -1003,6 +1007,6 @@ int main(int argc, char *argv[])
     }
     // float tps = total_count / (SLEEP_TIME_INIT / 1000 / 1000);
    //std::cout << "throughput exi:" << SKEW_PAR << " " << total_count / EX_TIME << " " << result << " " <<  batch__ <<  std::endl;
-    std::cout << batch << " " << total_count / EX_TIME << std::endl;
+    std::cout << THREAD_NUM << " " << BATCH_SIZE << " " <<  batch << " " << total_count / EX_TIME << std::endl;
     return 0;
 }
