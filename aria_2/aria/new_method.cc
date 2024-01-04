@@ -35,7 +35,7 @@
 int RW_RATE = 80;
 int BATCH_SIZE = 512;
 double SKEW_PAR = 0.0;
-int TX_PAR_THREAD = BATCH_SIZE/THREAD_NUM;
+int TX_PER_THREAD = BATCH_SIZE/THREAD_NUM;
 uint64_t tx_counter;
 std::vector<uint32_t> aborted_list(BATCH_SIZE);
 // DEFINE_uint64(tuple_num, 1000000, "Total number of records");
@@ -425,7 +425,6 @@ void makeDB()
 
 
 uint32_t batch;
-std::atomic<uint64_t> tx_lock = 0;
 std::vector<uint64_t> abort_tid_list(BATCH_SIZE);
 std::atomic<uint64_t> abort_counter = 0;
 uint64_t new_tx_num = 0;
@@ -435,11 +434,11 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
     Result &myres = std::ref(AllResult[thread_id]);
     std::vector<Transaction> transactions;
     
-    for (int i = 0; i < TX_PAR_THREAD; ++i) {
+    for (int i = 0; i < TX_PER_THREAD; ++i) {
         transactions.push_back(Transaction());
     }
-    for (int i = 0; i < TX_PAR_THREAD; ++i) {
-        transactions[i].tx_id_ = thread_id*TX_PAR_THREAD + i;
+    for (int i = 0; i < TX_PER_THREAD; ++i) {
+        transactions[i].tx_id_ = thread_id*TX_PER_THREAD + i;
     }
     uint32_t batch_id = 0;
     uint64_t sleep_flg = 0;
@@ -452,10 +451,9 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
     while (!__atomic_load_n(&quit, __ATOMIC_SEQ_CST))//0, 64,128
     {
         
-        //前のbatchにおいてabortしていた場合は、同一のTxを実行
         new_tx_num = BATCH_SIZE - abort_counter;
 
-        for(int i = 0;i < TX_PAR_THREAD;i++){
+        for(int i = 0;i < TX_PER_THREAD;i++){
                 if(THREAD_NUM*i + thread_id < abort_counter){
                     transactions[i].tx_pos_ = abort_tid_list[THREAD_NUM*i + thread_id] - 1;
                     abort_tid_list[THREAD_NUM*i + thread_id] = 0;
@@ -465,12 +463,12 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
             // Txの実行内容(task_set)の取得、tidの取得、batch_idの更新
                 aborted_list[transactions[i].tx_id_] = 0;
         }
-        barrier.wait(thread_id);//シーケンシング
+        barrier.wait(thread_id);
         if(thread_id == 0){
             tx_counter += new_tx_num;
             abort_counter = 0;
         }
-        for(int i = 0;i < TX_PAR_THREAD;i++){
+        for(int i = 0;i < TX_PER_THREAD;i++){
             transactions[i].task_set_ = Pre_tx_set[transactions[i].tx_pos_].first.task_set_;
             transactions[i].tid_ = Pre_tx_set[transactions[i].tx_pos_].second;
                 
@@ -491,7 +489,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
 
     //execution phase
         //make R&W-set
-        for(int i = 0;i < TX_PAR_THREAD;i++){
+        for(int i = 0;i < TX_PER_THREAD;i++){
             for (auto &task : transactions[i].task_set_)
             {
                 switch (task.ope_)
@@ -520,7 +518,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
         //同期ポイント① batch内の全てTxのWriteReservationが終了するのを待つ
         barrier.wait(thread_id);
         //実行しているTxのtid,Txが実行されているbatch_idを引数にとる
-        for(int i = 0;i < TX_PAR_THREAD;i++){
+        for(int i = 0;i < TX_PER_THREAD;i++){
             if(transactions[i].WAW(transactions[i].tid_, batch_id))
             {   
                 //wawがあった場合はabort
@@ -535,7 +533,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
         //同期ポイント② batch内の全てのTxの、wawによるabort、もしくはReadReservationが終わるのを待つ
         barrier.wait(thread_id);
         //Reorderingを行う
-        for(int i = 0;i < TX_PAR_THREAD;i++){
+        for(int i = 0;i < TX_PER_THREAD;i++){
             if(transactions[i].status_ != Status::ABORTED)
             {
                 //最初にRAWを持つか確認
@@ -569,7 +567,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
         //同期ポイント③ commitしたtransactionによるupdateを待つ
         barrier.wait(thread_id);
         
-        for(int i = 0;i < TX_PAR_THREAD;i++){
+        for(int i = 0;i < TX_PER_THREAD;i++){
             if (!__atomic_load_n(&quit, __ATOMIC_SEQ_CST) && transactions[i].status_ != Status::ABORTED)
             {
                 myres.commit_cnt_++;

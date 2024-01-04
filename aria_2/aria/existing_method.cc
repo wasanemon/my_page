@@ -32,7 +32,7 @@
 int RW_RATE = 80;
 int BATCH_SIZE = 16000;
 double SKEW_PAR = 0.9;
-int TX_PAR_THREAD = BATCH_SIZE/THREAD_NUM;
+int TX_PER_THREAD = BATCH_SIZE/THREAD_NUM;
 
 uint64_t tx_counter;
 
@@ -438,7 +438,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
     Result &myres = std::ref(AllResult[thread_id]);
     std::vector<Transaction> transactions;
     
-    for (int i = 0; i < TX_PAR_THREAD; ++i) {
+    for (int i = 0; i < TX_PER_THREAD; ++i) {
         transactions.push_back(Transaction());
     }
     uint32_t batch_id = 0;
@@ -460,7 +460,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
         // １つ前のepochにおいて、abortしていなかった場合、新たなTxを取得、実行する
         new_tx_num = BATCH_SIZE - abort_counter;
 
-        for(int i = 0;i < TX_PAR_THREAD;i++){
+        for(int i = 0;i < TX_PER_THREAD;i++){
                 if(THREAD_NUM*i + thread_id < abort_counter){
                     transactions[i].tx_pos_ = abort_tid_list[THREAD_NUM*i + thread_id] - 1;
                     if(abort_tid_list[THREAD_NUM*i + thread_id] == 0){
@@ -477,7 +477,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
             tx_counter += new_tx_num;
             abort_counter = 0;
         }
-        for(int i = 0;i < TX_PAR_THREAD;i++){
+        for(int i = 0;i < TX_PER_THREAD;i++){
             transactions[i].task_set_ = Pre_tx_set[transactions[i].tx_pos_].first.task_set_;
             transactions[i].tid_ = Pre_tx_set[transactions[i].tx_pos_].second;
             transactions[i].begin();
@@ -490,7 +490,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
 
         // execution phase starts
         // make read & write set
-        for(int i = 0;i < TX_PAR_THREAD;i++){
+        for(int i = 0;i < TX_PER_THREAD;i++){
             for (auto &task : transactions[i].task_set_)
             {
                 switch (task.ope_)
@@ -524,7 +524,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
         barrier.wait(thread_id);
         // commit phase starts
         // check waw conflict
-        for(int i = 0;i < TX_PAR_THREAD;i++){
+        for(int i = 0;i < TX_PER_THREAD;i++){
             if (transactions[i].WAW(transactions[i].tid_, batch_id))
             {
                 transactions[i].status_ = Status::ABORTED;
@@ -562,7 +562,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
         // commit phase ends
         barrier.wait(thread_id);
 
-        for(int i = 0;i < TX_PAR_THREAD;i++){
+        for(int i = 0;i < TX_PER_THREAD;i++){
             if (!__atomic_load_n(&quit, __ATOMIC_SEQ_CST) && transactions[i].status_ != Status::ABORTED)
             {
                 myres.commit_cnt_++;
