@@ -13,24 +13,29 @@
 #include <barrier>
 #include <array>
 
+//1038006/19903
+//52.153
 
 
 #define PAGE_SIZE 4096
 #define THREAD_NUM 16
 #define TUPLE_NUM 1000000
-#define MAX_OPE 10
-#define RW_RATE 50
+#define MAX_OPE 100
+//#define RW_RATE 50
 #define EX_TIME 3
-#define PRE_NUM 30000000
+#define PRE_NUM 5000000
 #define SLEEP_TIME 0
 #define SLEEP_TIME_INIT 2900 * 1000
 //#define SKEW_PAR 0.80
 #define BACKOFF_TIME 0
 #define SLEEP_RATE 0
-#define BATCH_SIZE 480
-#define TX_PAR_THREAD BATCH_SIZE/THREAD_NUM
+//#define BATCH_SIZE 512
+//#define TX_PAR_THREAD BATCH_SIZE/THREAD_NUM
 
-double SKEW_PAR = 0;
+int RW_RATE = 80;
+int BATCH_SIZE = 512;
+double SKEW_PAR = 0.0;
+int TX_PAR_THREAD = BATCH_SIZE/THREAD_NUM;
 uint64_t tx_counter;
 std::vector<uint32_t> aborted_list(BATCH_SIZE);
 // DEFINE_uint64(tuple_num, 1000000, "Total number of records");
@@ -422,7 +427,7 @@ void makeDB()
 uint32_t batch;
 std::atomic<uint64_t> tx_lock = 0;
 std::vector<uint64_t> abort_tid_list(BATCH_SIZE);
-std::atomic<int> abort_counter = 0;
+std::atomic<uint64_t> abort_counter = 0;
 uint64_t new_tx_num = 0;
 std::atomic<uint64_t> round_robin = 0;
 void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin_barrier& barrier)
@@ -453,26 +458,26 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
         for(int i = 0;i < TX_PAR_THREAD;i++){
                 if(THREAD_NUM*i + thread_id < abort_counter){
                     transactions[i].tx_pos_ = abort_tid_list[THREAD_NUM*i + thread_id] - 1;
-                    if(abort_tid_list[THREAD_NUM*i + thread_id] == 0){
-                        //cout << "aborror" << std::endl;
-                    }
                     abort_tid_list[THREAD_NUM*i + thread_id] = 0;
                 }else{
                     transactions[i].tx_pos_ = THREAD_NUM*i + thread_id + tx_counter - abort_counter;
                 }
             // Txの実行内容(task_set)の取得、tidの取得、batch_idの更新
-                transactions[i].task_set_ = Pre_tx_set[transactions[i].tx_pos_].first.task_set_;
-                transactions[i].tid_ = Pre_tx_set[transactions[i].tx_pos_].second;
-                
-                //sleep_flg = 0;
-                transactions[i].begin();
                 aborted_list[transactions[i].tx_id_] = 0;
         }
-        barrier.wait(thread_id);
-        if(thread_id == THREAD_NUM - 1){
+        barrier.wait(thread_id);//シーケンシング
+        if(thread_id == 0){
             tx_counter += new_tx_num;
             abort_counter = 0;
         }
+        for(int i = 0;i < TX_PAR_THREAD;i++){
+            transactions[i].task_set_ = Pre_tx_set[transactions[i].tx_pos_].first.task_set_;
+            transactions[i].tid_ = Pre_tx_set[transactions[i].tx_pos_].second;
+                
+            //sleep_flg = 0;
+            transactions[i].begin();
+        }
+        
         batch_id++;
         //if(thread_id == 0 && batch_id < 20){
             //cout << "batch" << batch_id << std::endl;
@@ -514,10 +519,6 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
         }
         //同期ポイント① batch内の全てTxのWriteReservationが終了するのを待つ
         barrier.wait(thread_id);
-        if(thread_id == THREAD_NUM - 1){
-            tx_counter += new_tx_num;
-            abort_counter = 0;
-        }
         //実行しているTxのtid,Txが実行されているbatch_idを引数にとる
         for(int i = 0;i < TX_PAR_THREAD;i++){
             if(transactions[i].WAW(transactions[i].tid_, batch_id))
@@ -1007,6 +1008,6 @@ int main(int argc, char *argv[])
     }
     // float tps = total_count / (SLEEP_TIME_INIT / 1000 / 1000);
    //std::cout << "throughput exi:" << SKEW_PAR << " " << total_count / EX_TIME << " " << result << " " <<  batch__ <<  std::endl;
-    std::cout << THREAD_NUM << " " << BATCH_SIZE << " " <<  batch << " " << total_count / EX_TIME << std::endl;
+    std::cout << RW_RATE << " "<< SKEW_PAR << " " << BATCH_SIZE << " " <<  batch << " " << total_count / EX_TIME << std::endl;
     return 0;
 }
