@@ -20,7 +20,7 @@
 #define MAX_OPE 100
 //#define RW_RATE 50
 #define EX_TIME 3
-#define PRE_NUM 5000000
+#define PRE_NUM 3000000
 #define SLEEP_TIME 0
 #define SLEEP_TIME_INIT 2900 * 1000
 //#define SKEW_PAR 0.80
@@ -30,8 +30,8 @@
 //#define TX_PAR_THREAD BATCH_SIZE/THREAD_NUM
 
 int RW_RATE = 80;
-int BATCH_SIZE = 16000;
-double SKEW_PAR = 0.9;
+int BATCH_SIZE = 1024;
+double SKEW_PAR = 0.6;
 int TX_PER_THREAD = BATCH_SIZE/THREAD_NUM;
 
 uint64_t tx_counter;
@@ -135,8 +135,6 @@ public:
         counter++;
     }
 };
-
-RWLock lock_for_locks;
 
 class Tuple
 {
@@ -427,12 +425,10 @@ void makeDB()
     }
 }
 
-uint32_t batch;
-std::atomic<uint64_t> tx_lock = 0;
-std::vector<uint64_t> abort_tid_list(BATCH_SIZE);
+
+std::vector<uint64_t> Next_Batch(BATCH_SIZE);
 std::atomic<int> abort_counter = 0;
 uint64_t new_tx_num = 0;
-uint64_t flg = 0;
 void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin_barrier& barrier)
 {
     Result &myres = std::ref(AllResult[thread_id]);
@@ -462,11 +458,8 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
 
         for(int i = 0;i < TX_PER_THREAD;i++){
                 if(THREAD_NUM*i + thread_id < abort_counter){
-                    transactions[i].tx_pos_ = abort_tid_list[THREAD_NUM*i + thread_id] - 1;
-                    if(abort_tid_list[THREAD_NUM*i + thread_id] == 0){
-                        //cout << "aborror" << std::endl;
-                    }
-                    abort_tid_list[THREAD_NUM*i + thread_id] = 0;
+                    transactions[i].tx_pos_ = Next_Batch[THREAD_NUM*i + thread_id] - 1;
+                    Next_Batch[THREAD_NUM*i + thread_id] = 0;
                 }else{
                     transactions[i].tx_pos_ = THREAD_NUM*i + thread_id + tx_counter - abort_counter;
                 }
@@ -515,11 +508,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
             transactions[i].ReserveRead(transactions[i].tid_, batch_id);
         }
         
-        // 性能計測用
-        //if (sleep_flg == 1)
-        //{
-            //std::this_thread::sleep_for(std::chrono::microseconds(SLEEP_TIME));
-        //}
+        
         // execution phase ends
         barrier.wait(thread_id);
         // commit phase starts
@@ -546,17 +535,13 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
             if (transactions[i].status_ == Status::ABORTED)
             {
                 abort_index = abort_counter.fetch_add(1);
-                abort_tid_list[abort_index] = transactions[i].tid_;
+                Next_Batch[abort_index] = transactions[i].tid_;
                 transactions[i].abort();
             }
             else
             {
-                //if(transactions[i].tid_ < 100){
-                    //cout << transactions[i].tid_ << std::endl;
-                //}
-                
-                transactions[i].update();
                 transactions[i].commit();
+                transactions[i].update();
             }
         }
         // commit phase ends
@@ -571,7 +556,7 @@ void worker(int thread_id, int &ready, const bool &start, const bool &quit, spin
     }
     // 各threadがworker関数を抜ける際に、他の同期ポイントで永遠に待つことがないようにするためのもの
     barrier.arrive_and_drop(thread_id);
-    batch = batch_id;
+
 
 }
 
@@ -595,360 +580,6 @@ int main(int argc, char *argv[])
     int tx_make_count = 0;
     for (auto &pre : Pre_tx_set)
     {
-
-       
-        if(tx_make_count < 0){
-            if(tx_make_count == 0){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1090);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 100);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 101);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 102);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1000);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 10000);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1010);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 102023);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 0);
-                pre.first.task_set_.emplace_back(Ope::READ, 0);
-                pre.first.task_set_.emplace_back(Ope::READ, 1);
-                pre.first.task_set_.emplace_back(Ope::READ, 2);
-                pre.first.task_set_.emplace_back(Ope::READ, 3);
-                pre.first.task_set_.emplace_back(Ope::READ, 4);
-                pre.first.task_set_.emplace_back(Ope::READ, 5);
-                pre.first.task_set_.emplace_back(Ope::READ, 6);
-            }
-            if(tx_make_count == 1){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 100000);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 10100);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 102000);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 100100);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1020);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 11);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1);
-                pre.first.task_set_.emplace_back(Ope::READ, 4);
-                pre.first.task_set_.emplace_back(Ope::READ, 5);
-                pre.first.task_set_.emplace_back(Ope::READ, 6);
-                pre.first.task_set_.emplace_back(Ope::READ, 7);
-                pre.first.task_set_.emplace_back(Ope::READ, 8);
-                pre.first.task_set_.emplace_back(Ope::READ, 9);
-            }
-            if(tx_make_count == 2){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 6);
-                pre.first.task_set_.emplace_back(Ope::READ, 1020);
-            }
-            if(tx_make_count == 3){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 5);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1020);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-            }
-            if(tx_make_count == 4){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 18);
-                pre.first.task_set_.emplace_back(Ope::READ, 5);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-                pre.first.task_set_.emplace_back(Ope::READ, 19);
-            }
-            if(tx_make_count == 5){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
-                pre.first.task_set_.emplace_back(Ope::READ, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-                pre.first.task_set_.emplace_back(Ope::READ, 18);
-                pre.first.task_set_.emplace_back(Ope::READ, 19);
-                pre.first.task_set_.emplace_back(Ope::READ, 20);
-                pre.first.task_set_.emplace_back(Ope::READ, 21);
-                pre.first.task_set_.emplace_back(Ope::READ, 22);
-                pre.first.task_set_.emplace_back(Ope::READ, 23);
-                pre.first.task_set_.emplace_back(Ope::READ, 24);
-                pre.first.task_set_.emplace_back(Ope::READ, 25);
-                pre.first.task_set_.emplace_back(Ope::READ, 26);
-                pre.first.task_set_.emplace_back(Ope::READ, 27);
-                
-            }
-            if(tx_make_count == 6){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 19);
-                pre.first.task_set_.emplace_back(Ope::READ, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-            }
-            if(tx_make_count == 7){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 198);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1988);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 156);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 172);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 164);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 11);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1);
-                pre.first.task_set_.emplace_back(Ope::READ, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-            }
-            if(tx_make_count == 8){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1342);
-                pre.first.task_set_.emplace_back(Ope::READ, 1342);
-                pre.first.task_set_.emplace_back(Ope::READ, 19);
-            }
-            if(tx_make_count == 9){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 98);
-                pre.first.task_set_.emplace_back(Ope::READ, 134);
-                pre.first.task_set_.emplace_back(Ope::READ, 1877);
-            }
-            
-            if(tx_make_count == 10){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 100000);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 10100);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 102000);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 100100);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1020);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 11);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1);
-                pre.first.task_set_.emplace_back(Ope::READ, 4);
-                pre.first.task_set_.emplace_back(Ope::READ, 5);
-                pre.first.task_set_.emplace_back(Ope::READ, 6);
-                pre.first.task_set_.emplace_back(Ope::READ, 7);
-                pre.first.task_set_.emplace_back(Ope::READ, 8);
-                pre.first.task_set_.emplace_back(Ope::READ, 9);
-            }
-            if(tx_make_count == 11){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 6);
-                pre.first.task_set_.emplace_back(Ope::READ, 1020);
-            }
-            if(tx_make_count == 12){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 5);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1020);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-            }
-            if(tx_make_count == 13){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 18);
-                pre.first.task_set_.emplace_back(Ope::READ, 5);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-                pre.first.task_set_.emplace_back(Ope::READ, 19);
-            }
-            if(tx_make_count == 14){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
-                pre.first.task_set_.emplace_back(Ope::READ, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-                pre.first.task_set_.emplace_back(Ope::READ, 18);
-                pre.first.task_set_.emplace_back(Ope::READ, 19);
-                pre.first.task_set_.emplace_back(Ope::READ, 20);
-                pre.first.task_set_.emplace_back(Ope::READ, 21);
-                pre.first.task_set_.emplace_back(Ope::READ, 22);
-                pre.first.task_set_.emplace_back(Ope::READ, 23);
-                pre.first.task_set_.emplace_back(Ope::READ, 24);
-                pre.first.task_set_.emplace_back(Ope::READ, 25);
-                pre.first.task_set_.emplace_back(Ope::READ, 26);
-                pre.first.task_set_.emplace_back(Ope::READ, 27);
-                
-            }
-            if(tx_make_count == 15){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 19);
-                pre.first.task_set_.emplace_back(Ope::READ, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-            }
-            if(tx_make_count ==16){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 198);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1988);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 156);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 172);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 164);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 11);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1);
-                pre.first.task_set_.emplace_back(Ope::READ, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-            }
-            if(tx_make_count == 17){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1342);
-                pre.first.task_set_.emplace_back(Ope::READ, 1342);
-                pre.first.task_set_.emplace_back(Ope::READ, 19);
-            }
-            if(tx_make_count == 18){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 98);
-                pre.first.task_set_.emplace_back(Ope::READ, 134);
-                pre.first.task_set_.emplace_back(Ope::READ, 1877);
-            }
-            if(tx_make_count == 19){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 10);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 0);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 102);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1000);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 100);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1010);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 102023);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 0);
-                pre.first.task_set_.emplace_back(Ope::READ, 0);
-                pre.first.task_set_.emplace_back(Ope::READ, 1);
-                pre.first.task_set_.emplace_back(Ope::READ, 6);
-            }
-            if(tx_make_count == 20){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 5);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 4);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 2);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 12);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 9);
-                pre.first.task_set_.emplace_back(Ope::READ, 4);
-                pre.first.task_set_.emplace_back(Ope::READ, 5);
-                pre.first.task_set_.emplace_back(Ope::READ, 6);
-                pre.first.task_set_.emplace_back(Ope::READ, 7);
-                pre.first.task_set_.emplace_back(Ope::READ, 8);
-                pre.first.task_set_.emplace_back(Ope::READ, 9);
-            }
-            if(tx_make_count == 21){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 6);
-                pre.first.task_set_.emplace_back(Ope::READ, 10);
-            }
-            if(tx_make_count == 22){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 10);
-                pre.first.task_set_.emplace_back(Ope::READ, 6);
-            }
-            if(tx_make_count == 23){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 5);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1020);
-                pre.first.task_set_.emplace_back(Ope::READ, 3);
-            }
-            if(tx_make_count == 24){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 6);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 5);
-                pre.first.task_set_.emplace_back(Ope::READ, 6);
-                pre.first.task_set_.emplace_back(Ope::READ, 15);
-                pre.first.task_set_.emplace_back(Ope::READ, 19);
-            }
-            if(tx_make_count == 25){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 19);
-                pre.first.task_set_.emplace_back(Ope::READ, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 0);
-                pre.first.task_set_.emplace_back(Ope::READ, 18);
-                pre.first.task_set_.emplace_back(Ope::READ, 19);
-                pre.first.task_set_.emplace_back(Ope::READ, 20);
-                pre.first.task_set_.emplace_back(Ope::READ, 21);
-                pre.first.task_set_.emplace_back(Ope::READ, 2);
-                pre.first.task_set_.emplace_back(Ope::READ, 3);
-                pre.first.task_set_.emplace_back(Ope::READ, 4);
-                pre.first.task_set_.emplace_back(Ope::READ, 5);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 6);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 7);
-                
-            }
-            if(tx_make_count == 26){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 19);
-                pre.first.task_set_.emplace_back(Ope::READ, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-            }
-            if(tx_make_count == 27){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 198);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1988);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 156);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 172);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 164);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 11);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1);
-                pre.first.task_set_.emplace_back(Ope::READ, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-            }
-            if(tx_make_count == 28){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1342);
-                pre.first.task_set_.emplace_back(Ope::READ, 1342);
-                pre.first.task_set_.emplace_back(Ope::READ, 19);
-            }
-            if(tx_make_count == 29){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 98);
-                pre.first.task_set_.emplace_back(Ope::READ, 134);
-                pre.first.task_set_.emplace_back(Ope::READ, 1877);
-            }
-            
-            if(tx_make_count == 30){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 100000);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 10100);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 102000);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 100100);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1020);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 11);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1);
-                pre.first.task_set_.emplace_back(Ope::READ, 4);
-                pre.first.task_set_.emplace_back(Ope::READ, 5);
-                pre.first.task_set_.emplace_back(Ope::READ, 6);
-                pre.first.task_set_.emplace_back(Ope::READ, 7);
-                pre.first.task_set_.emplace_back(Ope::READ, 8);
-                pre.first.task_set_.emplace_back(Ope::READ, 9);
-            }
-            if(tx_make_count == 31){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 6);
-                pre.first.task_set_.emplace_back(Ope::READ, 1020);
-            }
-            if(tx_make_count == 32){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 5);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1020);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-            }
-            if(tx_make_count == 33){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 18);
-                pre.first.task_set_.emplace_back(Ope::READ, 5);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-                pre.first.task_set_.emplace_back(Ope::READ, 19);
-            }
-            if(tx_make_count == 34){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1980);
-                pre.first.task_set_.emplace_back(Ope::READ, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-                pre.first.task_set_.emplace_back(Ope::READ, 18);
-                pre.first.task_set_.emplace_back(Ope::READ, 19);
-                pre.first.task_set_.emplace_back(Ope::READ, 20);
-                pre.first.task_set_.emplace_back(Ope::READ, 21);
-                pre.first.task_set_.emplace_back(Ope::READ, 22);
-                pre.first.task_set_.emplace_back(Ope::READ, 23);
-                pre.first.task_set_.emplace_back(Ope::READ, 24);
-                pre.first.task_set_.emplace_back(Ope::READ, 25);
-                pre.first.task_set_.emplace_back(Ope::READ, 26);
-                pre.first.task_set_.emplace_back(Ope::READ, 27);
-                
-            }
-            if(tx_make_count == 35){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 19);
-                pre.first.task_set_.emplace_back(Ope::READ, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-            }
-            if(tx_make_count ==36){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 9);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 8);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 156);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 172);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 164);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 11);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1);
-                pre.first.task_set_.emplace_back(Ope::READ, 17);
-                pre.first.task_set_.emplace_back(Ope::READ, 1980);
-                pre.first.task_set_.emplace_back(Ope::READ, 9);
-                pre.first.task_set_.emplace_back(Ope::READ, 8);
-                pre.first.task_set_.emplace_back(Ope::READ, 1);
-                pre.first.task_set_.emplace_back(Ope::READ, 156);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 172);
-                pre.first.task_set_.emplace_back(Ope::READ, 164);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 11);
-                pre.first.task_set_.emplace_back(Ope::READ, 1);
-            }
-            if(tx_make_count == 37){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 1342);
-                pre.first.task_set_.emplace_back(Ope::READ, 1342);
-                pre.first.task_set_.emplace_back(Ope::READ, 19);
-            }
-            if(tx_make_count == 38){
-                pre.first.task_set_.emplace_back(Ope::WRITE, 98);
-                pre.first.task_set_.emplace_back(Ope::READ, 4);
-                pre.first.task_set_.emplace_back(Ope::WRITE, 7);
-            
-            }
-        }
-        if(tx_make_count < 0){
-            pre.first.task_set_.emplace_back(Ope::WRITE, 0);
-            pre.first.task_set_.emplace_back(Ope::READ, 0);
-        }
         //if(tx_make_count >= 60){
         makeTask(pre.first.task_set_, rnd, zipf);
         //}
@@ -1005,6 +636,6 @@ int main(int argc, char *argv[])
 
     // float tps = total_count / (SLEEP_TIME_INIT / 1000 / 1000);
     //std::cout << "throughput exi:" << SKEW_PAR << " " << total_count / EX_TIME << " " << result << " " <<  batch__ <<  std::endl;
-    std::cout << RW_RATE << " "<<  SKEW_PAR << " " << BATCH_SIZE << " " << batch << " " << total_count / EX_TIME << std::endl;
+    std::cout << RW_RATE << " "<<  SKEW_PAR << " " << BATCH_SIZE << " " << total_count / EX_TIME << std::endl;
     return 0;
 }
